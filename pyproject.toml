@@ -1,0 +1,70 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "langsys-django"
+version = "0.1.0"
+description = "Django integration for Langsys — a thin wrapper over the langsys Python SDK: a template tag, request-locale middleware, and settings-based setup."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.9"
+authors = [{ name = "Langsys" }]
+keywords = ["langsys", "django", "i18n", "internationalization", "localization", "translation"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Framework :: Django",
+    "Framework :: Django :: 4.2",
+    "Framework :: Django :: 5.0",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Software Development :: Localization",
+]
+dependencies = [
+    "langsys>=0.1.0",
+    "Django>=4.2",
+]
+
+[project.urls]
+Homepage = "https://langsys.dev"
+Documentation = "https://docs.langsys.dev"
+Repository = "https://github.com/langsys/langsys-django"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4",
+    "pytest-django>=4.8",
+    "pytest-httpx>=0.30",
+    "mypy>=1.8",
+    "ruff>=0.4",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/langsys_django"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "SIM", "C4"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["E501"]
+
+[tool.mypy]
+strict = true
+# Django ships no type stubs here, so its classes/decorators are `Any`; relax the two
+# strict checks that would otherwise flag every AppConfig subclass and template decorator.
+disallow_subclassing_any = false
+disallow_untyped_decorators = false
+
+[[tool.mypy.overrides]]
+module = ["django.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "tests.settings"
+testpaths = ["tests"]
+pythonpath = ["."]
