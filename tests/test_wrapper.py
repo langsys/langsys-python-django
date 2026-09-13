@@ -18,26 +18,10 @@ from langsys_django.locale import (
 from langsys_django.middleware import LangsysMiddleware
 
 TRANS = re.compile(r"https://api\.test/api/translations")
-AUTH = re.compile(r"https://api\.test/api/authorize-project")
 
 
 def catalog(data):
     return {"status": True, "words": 0, "untranslatedWords": 0, "data": data}
-
-
-def authorize(key_type="read"):
-    return {
-        "status": True,
-        "data": {
-            "id": "proj-1",
-            "title": "T",
-            "base_locale": "en-us",
-            "target_locales": [],
-            "default_locales": {},
-            "key_type": key_type,
-            "langsys_settings": {"translatable_items": {"batch_limit": 200}},
-        },
-    }
 
 
 @pytest.fixture()
@@ -116,15 +100,3 @@ def test_middleware_locale_from_accept_language(httpx_mock, client):
 def test_middleware_resets_locale_after_request(httpx_mock, client):
     LangsysMiddleware(lambda r: HttpResponse("ok"))(RequestFactory().get("/?locale=es-ES"))
     assert get_current_locale() == ""  # context var reset
-
-
-def test_middleware_clears_pending_on_read_key(httpx_mock, client):
-    httpx_mock.add_response(url=AUTH, json=authorize("read"))
-    httpx_mock.add_response(url=TRANS, json=catalog({"UI": {}}))
-
-    def view(request):
-        t("A brand new phrase", "UI")  # missing -> queued for discovery
-        return HttpResponse("ok")
-
-    LangsysMiddleware(view)(RequestFactory().get("/?locale=es-ES"))
-    assert client.has_pending is False  # read key -> queue dropped, not left to grow

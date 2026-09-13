@@ -11,7 +11,6 @@ Example ``settings.py``::
         "QUERY_PARAM": "locale", # optional
         "COOKIE_NAME": "langsys_locale",           # optional
         "COOKIE_MAX_AGE": 31536000,                # optional (seconds)
-        "AUTO_FLUSH": True,      # optional: register discovered phrases after the response
     }
 
 Every value is optional here; the underlying SDK also falls back to ``LANGSYS_*`` env vars.
@@ -35,7 +34,6 @@ class LangsysSettings:
     query_param: str
     cookie_name: str
     cookie_max_age: int
-    auto_flush: bool
 
 
 def get_settings() -> LangsysSettings:
@@ -49,5 +47,4 @@ def get_settings() -> LangsysSettings:
         query_param=raw.get("QUERY_PARAM", "locale"),
         cookie_name=raw.get("COOKIE_NAME", "langsys_locale"),
         cookie_max_age=int(raw.get("COOKIE_MAX_AGE", 31536000)),
-        auto_flush=bool(raw.get("AUTO_FLUSH", True)),
     )

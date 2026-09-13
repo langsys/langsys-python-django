@@ -1,4 +1,4 @@
-"""The shared :class:`~langsys.LangsysClient` and the ``t()`` helper."""
+"""The shared :class:`~langsys.LangsysClient`, the ``t()`` helper, and the request boundary."""
 
 from __future__ import annotations
 
@@ -60,3 +60,22 @@ def t(phrase: str, category: Optional[str] = None, **params: Any) -> str:
     params. Usable in views; the ``{% t %}`` template tag delegates here.
     """
     return get_client().translate(phrase, category=category, params=params or None)
+
+
+def _finish_request(sender: Any, **kwargs: Any) -> None:
+    """End the request for the shared client: register what it found, forget its decision.
+
+    Connected to ``request_finished``, which Django fires from ``response.close()`` once the
+    response has been sent. So registration never spends the visitor's time (SRV-3), still
+    happens at the end of every request rather than only at process exit (REG-3), and the
+    write decision never outlives the request (GATE-3).
+
+    Both calls are the core's public seams, in this order on purpose: the flush sees the
+    decision this request observed, and then it is forgotten. Whether the queue is sent, held
+    or discarded is the core's decision alone — the binding never reads capability (BIND-2).
+    """
+    client = _client
+    if client is None:  # nothing has translated in this process yet
+        return
+    client.flush_pending()
+    client.reset_write_decision()

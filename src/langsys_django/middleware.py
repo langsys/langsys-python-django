@@ -1,24 +1,26 @@
 """Request-locale middleware.
 
-Resolves the locale for each request (``?locale=`` -> cookie -> ``Accept-Language``),
-exposes it to translations for the duration of the request, persists an explicit choice
-to a cookie, and — with a write key and ``AUTO_FLUSH`` on — registers any phrases
-discovered while rendering after the response is sent.
+Resolves the locale for each request (``?locale=`` -> cookie -> ``Accept-Language``), exposes
+it to translations for the duration of the request — including a streamed body rendered after
+this middleware has returned — and persists an explicit choice to a cookie.
+
+Registration is deliberately not done here: anything in ``__call__`` runs before the response
+is sent, on the visitor's time. The core's queue is flushed, and the request's write decision
+forgotten, when Django fires ``request_finished`` after the response is complete — see
+``client._finish_request``.
 """
 
 from __future__ import annotations
 
-import logging
-from typing import Callable
+from collections.abc import AsyncIterator, Iterable, Iterator
+from typing import Any, Callable
 
 from django.http import HttpRequest, HttpResponse
-from langsys import canonicalize_locale
+from langsys import LangsysClient, canonicalize_locale
 
 from .client import get_client
 from .conf import get_settings
 from .locale import reset_current_locale, set_current_locale
-
-logger = logging.getLogger("langsys")
 
 
 class LangsysMiddleware:
@@ -36,6 +38,8 @@ class LangsysMiddleware:
             if token is not None:
                 reset_current_locale(token)
 
+        if locale and response.streaming:
+            _stream_in_locale(response, locale)
         if persist and locale:
             response.set_cookie(
                 self._cfg.cookie_name,
@@ -43,11 +47,9 @@ class LangsysMiddleware:
                 max_age=self._cfg.cookie_max_age,
                 samesite="Lax",
             )
-
-        self._handle_pending(client)
         return response
 
-    def _resolve(self, request: HttpRequest, client: object) -> tuple[str, bool]:
+    def _resolve(self, request: HttpRequest, client: LangsysClient) -> tuple[str, bool]:
         query = request.GET.get(self._cfg.query_param)
         if query:
             return canonicalize_locale(query), True  # explicit choice -> persist
@@ -55,18 +57,44 @@ class LangsysMiddleware:
         if cookie:
             return canonicalize_locale(cookie), False
         header = request.META.get("HTTP_ACCEPT_LANGUAGE")
-        detected = client.detect_preferred_locale(header, self._cfg.supported or None)  # type: ignore[attr-defined]
+        detected = client.detect_preferred_locale(header, self._cfg.supported or None)
         return (detected or ""), False
 
-    def _handle_pending(self, client: object) -> None:
-        if not client.has_pending:  # type: ignore[attr-defined]
-            return
-        # Register on write keys (when enabled); otherwise just drop the queue so a
-        # long-running read-key server doesn't accumulate it unbounded.
+
+def _stream_in_locale(response: Any, locale: str) -> None:
+    """Render each chunk of a streamed body under the request's locale.
+
+    A streamed body is produced while the server iterates it, after ``__call__`` has returned
+    and reset the context variable. The locale is set around fetching each chunk rather than
+    held across ``yield``, so it never leaks into the code consuming the stream.
+    """
+    if response.is_async:
+        response.streaming_content = _achunks_in_locale(response.streaming_content, locale)
+    else:
+        response.streaming_content = _chunks_in_locale(response.streaming_content, locale)
+
+
+def _chunks_in_locale(content: Iterable[bytes], locale: str) -> Iterator[bytes]:
+    chunks = iter(content)
+    while True:
+        token = set_current_locale(locale)
         try:
-            if self._cfg.auto_flush and client.can_write:  # type: ignore[attr-defined]
-                client.flush_pending()  # type: ignore[attr-defined]
-            else:
-                client.clear_pending()  # type: ignore[attr-defined]
-        except Exception as exc:  # pragma: no cover - never break the response
-            logger.warning("langsys: flushing pending registrations failed: %s", exc)
+            chunk = next(chunks)
+        except StopIteration:
+            return
+        finally:
+            reset_current_locale(token)
+        yield chunk
+
+
+async def _achunks_in_locale(content: AsyncIterator[bytes], locale: str) -> AsyncIterator[bytes]:
+    chunks = content.__aiter__()
+    while True:
+        token = set_current_locale(locale)
+        try:
+            chunk = await chunks.__anext__()
+        except StopAsyncIteration:
+            return
+        finally:
+            reset_current_locale(token)
+        yield chunk

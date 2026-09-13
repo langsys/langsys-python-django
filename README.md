@@ -45,6 +45,9 @@ In templates:
 {{ "Save"|t:"UI" }}
 ```
 
+A keyword argument whose variable doesn't exist is passed to the SDK as *missing*, not as an
+empty string, so the gap stays visible (`Hello, {name}!`) instead of rendering `Hello, !`.
+
 In Python (views, etc.):
 
 ```python
@@ -62,23 +65,35 @@ html = get_client().translate_page(rendered_html, category="UI")   # needs langs
 `LangsysMiddleware` picks the request locale in order: `?locale=` (persisted to a cookie),
 then the `langsys_locale` cookie, then the `Accept-Language` header (matched against
 `SUPPORTED`). It exposes that locale to translations for the request via a context
-variable, so a single shared client is safe across concurrent requests.
+variable — including a streamed response body, which renders after the middleware has
+returned — so a single shared client is safe across concurrent requests.
 
-With a **write** key and `AUTO_FLUSH` (default on), phrases discovered while rendering are
-registered after the response; with a **read** key nothing is written.
+## When phrases are registered
+
+Phrases the catalog doesn't have yet are queued while the page renders. When Django fires
+`request_finished` — after the response, streamed bodies included, has been sent — the app asks
+the SDK to flush that queue and to forget the request's write decision, so the decision never
+carries over to the next request.
+
+Whether anything is sent is the SDK's call, not this package's: the server decides per session
+whether it may write. A read-only key sends nothing, and if the API can't be reached the queue is
+kept and retried rather than dropped. The SDK also sends on a short debounce of its own, so on a
+render that runs long a batch can still go out before the response finishes.
+
+Outside a request — a management command, a Celery task — the SDK's debounce and exit hook
+apply; call `get_client().flush_pending()` at the end of long-running work.
 
 ## Settings reference
 
 | Key | Default | Purpose |
 |---|---|---|
 | `API_KEY` / `PROJECT_ID` | env `LANGSYS_*` | credentials |
-| `API_URL` | `https://api.langsys.dev/api` | backend host |
+| `API_URL` | `https://api.langsys.dev/api` | backend host — point it at a test double to run without the real API. Read when the client is first built, so call `langsys_django.reset_client()` after changing it |
 | `BASE_LOCALE` | project base | source-string locale |
 | `SUPPORTED` | `[]` | locale allow-list for `Accept-Language` matching |
 | `QUERY_PARAM` | `locale` | query param that switches locale |
 | `COOKIE_NAME` | `langsys_locale` | persisted-choice cookie |
 | `COOKIE_MAX_AGE` | `31536000` | cookie lifetime (seconds) |
-| `AUTO_FLUSH` | `True` | register discovered phrases after the response (write key) |
 
 ## Releasing
 
