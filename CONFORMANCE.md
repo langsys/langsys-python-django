@@ -8,7 +8,7 @@
 | **specVersion** | 8.0.1 |
 | **Spec pin, re-derived** | `git -C ~/Documents/dev/langsys2 rev-parse 5cff03a17751e7dae9dcf1af52a9454d027c9006:docs/sdk-spec.mdx` → `5c5c0723f88fb8e6b13f58876c7adca8b6b35691`, re-derived on 2026-09-12 when this file was written. It is pinned by commit, never by branch, and `test_the_pinned_rule_list_is_the_spec_blob_itself` re-derives it on every run where langsys2 is present |
 | **SDK revision** | branch `feature/838_write_key_gating`, cut from `main` @ `34a6a87` |
-| **Core consumed** | The `langsys-python` working copy, through a local symlink excluded from git and an editable install: `feature/838_write_key_gating` @ `c79fd57cc553`, **with uncommitted edits** to `html/page.py`, `html/parser.py` and `interpolate.py` (the Python lane's in-flight 8.0.1 work). This suite takes no HTML path. The `interpolate.py` edit only adds `percent_placeholders_to_braces` (TOK-5 capture) and changes no path the ICU tag tests take. A run against an extracted `c79fd57` was not performed here (declined in this session); Reviewer's pinned run, below, is the authoritative one. The core's own conformance file is filed against v8 blob `b657b490`, not 8.0.1. **Pinned verification:** Reviewer ran the suite at `1268e88` in a clone, with a `git archive` of core `c79fd57` first on `PYTHONPATH`: 85 passed, 2 xfailed, and `_dev_/mutations.py` exited 0. **Live-tree hazard, measured:** one full run here went red on SRV-2 at about 18:31, while the core's own `_dev_/run_mutations.py` was rewriting core source files in place (it writes each mutated file and then restores it). Five reruns and the full suite were green once the files were restored; which mutation was active is not recoverable |
+| **Core consumed** | The `langsys-python` working copy on `feature/838_write_key_gating`, through a local symlink excluded from git and an editable install. Delegated rows are graded against the core's canonical conformance file at `3c9e505`, which cites the same spec blob. The suite was last run against the core's clean tree at `506dd86`: 93 passed, 2 xfailed. Between the two, `a7d33ad` changes `client.py` so `sync()` no longer re-registers text equal to a content block's id, and `506dd86` moves the core's mutation harness onto an isolated copy. **Pinned verification:** Reviewer ran the suite at `1268e88` in a clone, with a `git archive` of core `c79fd57` first on `PYTHONPATH`: 85 passed, 2 xfailed, and `_dev_/mutations.py` exited 0. Reviewer's checker read `0bfed45` as 79/79 with no format errors |
 | **Published** | Never |
 | **Suite** | 95 tests in 8 files: 93 pass, 2 strict xfail (SRV-3, waiting on the core seam). `ruff` and `mypy --strict` are clean |
 | **Runtime** | Django 4.2.30 on CPython 3.9.6 |
@@ -87,7 +87,8 @@ code, not by reading it.
     receiving a mix of both languages, while the Python lane's mutation harness was rewriting core
     source files in place. The test passed five times alone, and in the full suite, once the files were
     restored. The failure is consistent with the core being mid-mutation, but which mutation was
-    active is not recoverable. The evidence that counts is Reviewer's run against a pinned core.
+    active is not recoverable. Reviewer made isolated-copy mutation runs a fleet norm, and the core's
+    harness has run on an isolated copy since `506dd86`.
 
 ## Summary
 
@@ -106,39 +107,37 @@ table and these numbers disagree.
 listed rather than left to be found. Reviewer's ruling: the checker resolves each delegated row against
 the core's current grade, so these count red for this lane until the core's rows are green. They stay
 `delegated` because the binding takes part in none of them:
-- GATE-6 and GATE-7: the core grades them `partial` because their report direction is vacuous on the
-  server profile (HINT-2).
-- TOK-1 and TOK-2: the core files them against v8 and defers the 8.0.1 changes (the svg/math
-  exclusions and the enumerated whitespace set).
-- TOK-5: the 8.0.1 capture half exists only in the core's uncommitted working tree.
+- Not green at the core's canonical `3c9e505`: GATE-7, REG-12, TOK-3 and TOK-4 (`partial`), and TOK-2
+  (`held (strip ruling)`).
+- Provisional at `3c9e505`, on mock evidence: GATE-2, GATE-5, REG-8 and REG-9.
 
 ## Status
 
 | Rule | Status | Tier | Evidence |
 |---|---|---|---|
 | GATE-1 | delegated | - | core `GATE-1` (implemented, live). Probe `capability` matches nothing in this binding and fires on core `client.py` and on this binding's `middleware.py` at `34a6a87`, which branched on `can_write` |
-| GATE-2 | delegated | - | core `GATE-2` (implemented, mock): the core holds the queue when capability is unknown. Probe `queue-mutation` matches nothing here and fires on core `client.py` and on `middleware.py` at `34a6a87`, whose `clear_pending()` discarded a held queue. End to end, `test_BIND2_capability_unknown_holds_the_queue_through_the_binding` was red at `34a6a87` (finding 1), and mutation M1 reddens it |
+| GATE-2 | delegated | - | core `GATE-2` (**provisional**, mock): the core holds the queue when capability is unknown. Probe `queue-mutation` matches nothing here and fires on core `client.py` and on `middleware.py` at `34a6a87`, whose `clear_pending()` discarded a held queue. End to end, `test_BIND2_capability_unknown_holds_the_queue_through_the_binding` was red at `34a6a87` (finding 1), and mutation M1 reddens it |
 | GATE-3 | implemented | n/a (pure) | The core's declared wrapper obligation. On `request_finished` the binding calls the core's `reset_write_decision()` after the flush, so the flush uses the decision this request observed and the next request starts without it. `test_GATE3_an_observed_write_decision_does_not_survive_the_request` covers the latch, on the discriminating vector where `key_type` and `write_enabled` disagree. `test_GATE3_the_unusable_capability_notice_rearms_at_each_request` uses a legitimate `ip_write` answer. Both were red at `34a6a87`, and mutation M4 reddens both. No carve-out is taken |
-| GATE-4 | delegated | - | core `GATE-4` (implemented, live). Probe `cache`: this binding writes no cache, so it has nothing to strip. It fires on core `catalog.py` |
-| GATE-5 | delegated | - | core `GATE-5` (implemented, mock; the core keeps no "already registered" store). Probe `queue-mutation`: this binding keeps no queue or bookkeeping. It fires on core `client.py` and on `middleware.py` at `34a6a87` |
-| GATE-6 | delegated | - | core `GATE-6` (**partial**: the report half is vacuous on the server profile). Probe `registration-request` shows no registration is constructed here and fires on core `registration.py`. Probe `report-lane` shows there is no report lane and fires on the TypeScript core's `api.ts` and on a synthetic call. Choosing the lane is the core's alone. This row delegates to a core row that is not green |
-| GATE-7 | delegated | - | core `GATE-7` (**partial**, with the same vacuous report direction). Probe `catalog-read`: this binding never reads the catalog, so it cannot detect a miss the core does not see. It fires on core `client.py`. Every entry point this binding adds reaches the core: `test_GATE7_every_entry_point_reaches_the_core_queue` covers the tag, filter and helper, and `test_SRV3_a_streamed_body_is_complete_before_its_misses_are_sent` covers a streamed render. Mutation M8 reddens the first. This row delegates to a core row that is not green |
-| GATE-8 | delegated | - | core `GATE-8` (implemented, mock). Probe `capability`: nothing here reads `write_enabled` or `key_type`, so there is no absence to misread. It fires on core `client.py` and on `middleware.py` at `34a6a87` |
+| GATE-4 | delegated | - | core `GATE-4` (implemented, n/a (pure)). Probe `cache`: this binding writes no cache, so it has nothing to strip. It fires on core `catalog.py` |
+| GATE-5 | delegated | - | core `GATE-5` (**provisional**, mock; the core keeps no "already registered" store). Probe `queue-mutation`: this binding keeps no queue or bookkeeping. It fires on core `client.py` and on `middleware.py` at `34a6a87` |
+| GATE-6 | delegated | - | core `GATE-6` (n/a (architecture): no report lane exists, per HINT-2). Probe `registration-request` shows no registration is constructed here and fires on core `registration.py`. Probe `report-lane` shows there is no report lane and fires on the TypeScript core's `api.ts` and on a synthetic call. Choosing the lane is the core's alone. |
+| GATE-7 | delegated | - | core `GATE-7` (**partial**, n/a (pure)). Probe `catalog-read`: this binding never reads the catalog, so it cannot detect a miss the core does not see. It fires on core `client.py`. Every entry point this binding adds reaches the core: `test_GATE7_every_entry_point_reaches_the_core_queue` covers the tag, filter and helper, and `test_SRV3_a_streamed_body_is_complete_before_its_misses_are_sent` covers a streamed render. Mutation M8 reddens the first. This row delegates to a core row that is not green |
+| GATE-8 | delegated | - | core `GATE-8` (implemented, n/a (pure)). Probe `capability`: nothing here reads `write_enabled` or `key_type`, so there is no absence to misread. It fires on core `client.py` and on `middleware.py` at `34a6a87` |
 | CAT-1 | delegated | - | core `CAT-1` (implemented, n/a (pure)). Probe `catalog-read` matches nothing here and fires on core `client.py` |
 | CAT-2 | delegated | - | core `CAT-2` (implemented, n/a (pure)). Probe `catalog-read` matches nothing here and fires on core `client.py` |
 | CAT-3 | delegated | - | core `CAT-3` (implemented, n/a (pure)). Probe `block-identity`: there is no content-block handling here. It fires on core `client.py` |
 | REG-1 | delegated | - | core `REG-1` (implemented, live). Probe `registration-request`: this binding constructs no registration. It fires on core `registration.py`. Through the handler, `test_SRV3_a_read_only_key_pushes_nothing` shows the request hook opens no send path around the core's gate |
-| REG-2 | delegated | - | core `REG-2` (implemented, mock). Probe `scheduling`: there is no timer, sleep or debounce here. It fires on core `client.py`. The core's debounce is left exactly as the core configures it; disabling it from here was ruled out (option (a), BIND-1 and BIND-3) |
+| REG-2 | delegated | - | core `REG-2` (implemented, n/a (pure)). Probe `scheduling`: there is no timer, sleep or debounce here. It fires on core `client.py`. The core's debounce is left exactly as the core configures it; disabling it from here was ruled out (option (a), BIND-1 and BIND-3) |
 | REG-3 | implemented | n/a (pure) | The core's declared wrapper obligation. The core's public `flush_pending()` runs on every `request_finished`, not only at process exit. `test_REG3_the_queue_is_registered_at_the_end_of_every_request` runs with no debounce, no exit hook and no explicit flush, so the request boundary is its only send path. Mutation M2 reddens it along with every other request-boundary test. The public manual flush and the best-effort exit hook remain the core's, and the README points work outside a request at `get_client().flush_pending()` |
 | REG-4 | n/a (profile: browser) | - | Browser teardown via `keepalive`. A server has no page teardown |
 | REG-5 | n/a (profile: browser) | - | The browser teardown flush path. A server has no page teardown |
-| REG-6 | delegated | - | core `REG-6` (implemented, mock). Probe `queue-mutation`: this binding never snapshots or clears the queue. It fires on core `client.py` and on `middleware.py` at `34a6a87`, which cleared it |
-| REG-7 | delegated | - | core `REG-7` (implemented, mock). Probe `send-concurrency` matches nothing here and fires on core `client.py`. The request hook calls the core's flush, which declines while a send is in flight |
-| REG-8 | delegated | - | core `REG-8` (implemented, mock). Probe `scheduling`: there is no retry or backoff here. It fires on core `client.py` |
-| REG-9 | delegated | - | core `REG-9` (implemented, mock). Probe `batching` matches nothing here and fires on core `registration.py` |
+| REG-6 | delegated | - | core `REG-6` (implemented, n/a (pure)). Probe `queue-mutation`: this binding never snapshots or clears the queue. It fires on core `client.py` and on `middleware.py` at `34a6a87`, which cleared it |
+| REG-7 | delegated | - | core `REG-7` (implemented, n/a (pure)). Probe `send-concurrency` matches nothing here and fires on core `client.py`. The request hook calls the core's flush, which declines while a send is in flight |
+| REG-8 | delegated | - | core `REG-8` (**provisional**, mock). Probe `scheduling`: there is no retry or backoff here. It fires on core `client.py` |
+| REG-9 | delegated | - | core `REG-9` (**provisional**, mock). Probe `batching` matches nothing here and fires on core `registration.py` |
 | REG-10 | delegated | - | core `REG-10` (implemented, live). Probe `failure-shape`: there is no swallowed exception and no success-shaped result here. It fires on core `client.py` and on `middleware.py` at `34a6a87`, which wrapped its flush in `except Exception` |
-| REG-11 | delegated | - | core `REG-11` (implemented, mock). Probe `ellipsis` matches nothing here and fires on core `client.py` |
-| REG-12 | delegated | - | core `REG-12` (implemented, n/a (pure)). Probe `block-identity` matches nothing here and fires on core `client.py` |
+| REG-11 | delegated | - | core `REG-11` (implemented, n/a (pure)). Probe `ellipsis` matches nothing here and fires on core `client.py` |
+| REG-12 | delegated | - | core `REG-12` (**partial**, n/a (pure)); this row delegates to a core row that is not green. Probe `block-identity` matches nothing here and fires on core `client.py` |
 | HINT-1 | n/a (profile: browser) | - | The report payload. A server SDK never reports (HINT-2) |
 | HINT-2 | delegated | - | core `HINT-2` (implemented, n/a (pure): no report lane exists). Probe `report-lane` matches nothing here. It fires on the TypeScript core's `api.ts`, which posts to `discovery/hint`, and on a synthetic call, so a report lane added to this binding would turn it red |
 | HINT-3 | n/a (profile: browser) | - | URL capture timing for reports. A server has no report lane |
@@ -160,13 +159,13 @@ the core's current grade, so these count red for this lane until the core's rows
 | CID-2 | delegated | - | core `CID-2` (implemented, n/a (pure)). Probe `block-identity` matches nothing here and fires on core `client.py` |
 | CID-3 | delegated | - | core `CID-3` (implemented, n/a (pure)). Probe `block-identity` fires on core `client.py`. This binding reads ids only through the core, which carries the tolerating half |
 | CID-4 | delegated | - | core `CID-4` (implemented, n/a (pure)). Probe `block-identity` matches nothing here and fires on core `client.py` |
-| TOK-1 | delegated | - | core `TOK-1` (implemented, mock, **filed against v8**: the core defers the 8.0.1 svg/math change). Probe `tokenizer`: there is no tokenizer here. It fires on core `client.py`. Page and block translation are reached only as `get_client().translate_page(…)`, which is the core by reference. This row delegates to a core row not yet re-filed at 8.0.1 |
-| TOK-2 | delegated | - | core `TOK-2` (implemented, mock, **filed against v8**: the core defers the enumerated 8.0.1 collapse set and has measured its divergences). Probe `tokenizer` matches nothing here and fires on core `client.py`. This row delegates to a core row not yet re-filed at 8.0.1 |
-| TOK-3 | delegated | - | core `TOK-3` (implemented, n/a (pure)). Probe `tokenizer` matches nothing here and fires on core `client.py` |
-| TOK-4 | delegated | - | core `TOK-4` (implemented, n/a (pure)). Probe `tokenizer` matches nothing here and fires on core `client.py` |
-| TOK-5 | delegated | - | core `TOK-5` (implemented, n/a (pure), at v8). Probe `interpolation` matches nothing here and fires on core `interpolate.py`. The 8.0.1 capture half, normalising `%name%` before the id is derived, exists only as an uncommitted change in the core |
-| MARK-1 | delegated | - | core `MARK-1` (implemented, mock). Probe `identity-stamping`: no host is stamped here. It fires on core `client.py` |
-| MARK-2 | delegated | - | core `MARK-2` (implemented, mock). Probe `identity-stamping` matches nothing here and fires on core `client.py` |
+| TOK-1 | delegated | - | core `TOK-1` (implemented, n/a (pure)). Probe `tokenizer`: there is no tokenizer here. It fires on core `client.py`. Page and block translation are reached only as `get_client().translate_page(…)`, which is the core by reference |
+| TOK-2 | delegated | - | core `TOK-2` (**held (strip ruling)**, n/a (pure)). Probe `tokenizer` matches nothing here and fires on core `client.py`. This row delegates to a core row that is not green |
+| TOK-3 | delegated | - | core `TOK-3` (**partial**, n/a (pure)); this row delegates to a core row that is not green. Probe `tokenizer` matches nothing here and fires on core `client.py` |
+| TOK-4 | delegated | - | core `TOK-4` (**partial**, n/a (pure)); this row delegates to a core row that is not green. Probe `tokenizer` matches nothing here and fires on core `client.py` |
+| TOK-5 | delegated | - | core `TOK-5` (implemented, n/a (pure)). Probe `interpolation` matches nothing here and fires on core `interpolate.py` |
+| MARK-1 | delegated | - | core `MARK-1` (implemented, n/a (pure)). Probe `identity-stamping`: no host is stamped here. It fires on core `client.py` |
+| MARK-2 | delegated | - | core `MARK-2` (implemented, n/a (pure)). Probe `identity-stamping` matches nothing here and fires on core `client.py` |
 | SSR-1 | n/a (profile: browser) | - | Where the browser SDK collects under the client strategy. This is a server binding |
 | SSR-2 | n/a (profile: browser) | - | The browser SDK degrading its strategy when a grant is configured. This is a server binding |
 | SSR-3 | n/a (profile: browser) | - | The browser SDK's server-strategy precondition. This is a server binding |
@@ -185,9 +184,9 @@ the core's current grade, so these count red for this lane until the core's rows
 | GRANT-2 | n/a (profile: browser) | - | Resolving a browser grant per request. A server holds a key |
 | GRANT-3 | n/a (profile: browser) | - | Re-authorizing on a new browser grant. A server holds a key |
 | GRANT-4 | n/a (profile: browser) | - | The `X-Write-Grant` header. This binding sets no header |
-| CACHE-1 | delegated | - | core `CACHE-1` (implemented, mock). Probe `cache`: no cache key is built here. It fires on core `catalog.py` |
-| OBS-1 | delegated | - | core `OBS-1` (implemented, mock). Probe `diagnostics`: this binding logs nothing of its own. It fires on core `client.py` and on `middleware.py` at `34a6a87`. The request boundary is what re-arms the core's once-per-session notice: see `test_GATE3_the_unusable_capability_notice_rearms_at_each_request` |
-| WIRE-1 | delegated | - | core `WIRE-1` (implemented, n/a (pure)). Probe `auth-header` matches nothing here and fires on core `http.py` |
+| CACHE-1 | delegated | - | core `CACHE-1` (implemented, n/a (pure)). Probe `cache`: no cache key is built here. It fires on core `catalog.py` |
+| OBS-1 | delegated | - | core `OBS-1` (implemented, n/a (pure)). Probe `diagnostics`: this binding logs nothing of its own. It fires on core `client.py` and on `middleware.py` at `34a6a87`. The request boundary is what re-arms the core's once-per-session notice: see `test_GATE3_the_unusable_capability_notice_rearms_at_each_request` |
+| WIRE-1 | delegated | - | core `WIRE-1` (implemented, live). Probe `auth-header` matches nothing here and fires on core `http.py` |
 | WIRE-2 | delegated | - | core `WIRE-2` (implemented, n/a (pure)). Probe `response-parsing`: no API response is parsed here. It fires on core `http.py` |
 | WIRE-3 | delegated | - | core `WIRE-3` (implemented, live). Probe `identifier-normalisation`: there is no lowercasing or sentinel here. It fires on core `catalog.py`. The middleware hands the core `canonicalize_locale` output, and the core lowercases it on the wire |
 | WIRE-4 | delegated | - | core `WIRE-4` (implemented, live). Probe `raising`: nothing on this binding's paths raises. It fires on core `http.py`. The request hook calls `flush_pending()`, which the core guarantees never raises (REG-10) |
@@ -243,15 +242,16 @@ package as imported, so a mutated copy is what they probe.
    visitor's request thread, but a render that runs past 0.4s, or overlaps another request's end, can
    register before its own response is complete. That breaks the order of events SRV-3 legislates.
    Blocked on the core request-scope seam (ruling (c)). The two strict xfails flip when it lands.
-4. **Delegated rows whose core row is not green at 8.0.1 count red for this lane.** GATE-6 and GATE-7 are `partial` in the core
-   for a report direction the server profile cannot exercise. TOK-1 and TOK-2 are deferred to 8.0.1 in
-   the core. TOK-5's capture half is uncommitted there. All are core-side.
+4. **Delegated rows whose core row is not green count red for this lane.** Against the core's canonical
+   `3c9e505`, GATE-7, REG-12, TOK-3 and TOK-4 are `partial` and TOK-2 is `held (strip ruling)`, while
+   GATE-2, GATE-5, REG-8 and REG-9 are `provisional`. All of these are core-side, and this lane's green
+   follows the core's.
 5. **BIND-4 waits on the operator's ambient-locale ruling.** `QUERY_PARAM`, `COOKIE_NAME` and
    `COOKIE_MAX_AGE` stay until then, as ruled for Rails. If the ruling reads BIND-4 as zero added keys,
    they become fixed defaults, which is a small change.
 6. **The profile is derived, not named.** The spec covers Django only as a "framework variant". Every
    `n/a` here rests on reading this package as a binding over a server core. Reviewer has flagged this
    to the operator.
-7. **Local evidence runs against a live core tree.** The core's uncommitted edits sit on paths this
-   suite does not take, but its own mutation harness rewrites source in place, and one local run went
-   red while it did (item 12). Reviewer's run against a pinned `c79fd57` is the authoritative one.
+7. **Local evidence runs against a live core tree, not a pin.** The core's harness no longer rewrites
+   that tree (`506dd86`), but a local run still loads whatever the core branch holds at that moment.
+   Pinned runs, like Reviewer's, are the authoritative ones.
