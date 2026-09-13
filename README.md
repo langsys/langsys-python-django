@@ -60,6 +60,12 @@ label = t("Hello, {name}!", "Greetings", name="Sarah")
 html = get_client().translate_page(rendered_html, category="UI")   # needs langsys[html]
 ```
 
+`t()` and `{% t %}` keep the names `phrase` and `category` for themselves, so a placeholder with
+either name can't be passed as a keyword: `t("Browse {category}", category=name)` uses `name` as
+the category. In Python, pass the value through the SDK:
+`get_client().translate("Browse {category}", category="UI", params={"category": name})`. In a
+template, rename the placeholder.
+
 ## How the locale is resolved
 
 `LangsysMiddleware` picks the request locale in order: `?locale=` (persisted to a cookie),

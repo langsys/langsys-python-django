@@ -8,9 +8,9 @@
 | **specVersion** | 8.0.1 |
 | **Spec pin, re-derived** | `git -C ~/Documents/dev/langsys2 rev-parse 5cff03a17751e7dae9dcf1af52a9454d027c9006:docs/sdk-spec.mdx` → `5c5c0723f88fb8e6b13f58876c7adca8b6b35691`, re-derived on 2026-09-12 when this file was written. It is pinned by commit, never by branch, and `test_the_pinned_rule_list_is_the_spec_blob_itself` re-derives it on every run where langsys2 is present |
 | **SDK revision** | branch `feature/838_write_key_gating`, cut from `main` @ `34a6a87` |
-| **Core consumed** | The `langsys-python` working copy, through a local symlink excluded from git and an editable install: `feature/838_write_key_gating` @ `c79fd57cc553`, **with uncommitted edits** to `html/page.py`, `html/parser.py` and `interpolate.py` (the Python lane's in-flight 8.0.1 work). This suite takes no HTML path. The `interpolate.py` edit only adds `percent_placeholders_to_braces` (TOK-5 capture) and changes no path the ICU tag tests take. A run against an extracted `c79fd57` was not performed: it was declined in this session. The core's own conformance file is filed against v8 blob `b657b490`, not 8.0.1 |
+| **Core consumed** | The `langsys-python` working copy, through a local symlink excluded from git and an editable install: `feature/838_write_key_gating` @ `c79fd57cc553`, **with uncommitted edits** to `html/page.py`, `html/parser.py` and `interpolate.py` (the Python lane's in-flight 8.0.1 work). This suite takes no HTML path. The `interpolate.py` edit only adds `percent_placeholders_to_braces` (TOK-5 capture) and changes no path the ICU tag tests take. A run against an extracted `c79fd57` was not performed here (declined in this session); Reviewer's pinned run, below, is the authoritative one. The core's own conformance file is filed against v8 blob `b657b490`, not 8.0.1. **Pinned verification:** Reviewer ran the suite at `1268e88` in a clone, with a `git archive` of core `c79fd57` first on `PYTHONPATH`: 85 passed, 2 xfailed, and `_dev_/mutations.py` exited 0. **Live-tree hazard, measured:** one full run here went red on SRV-2 at about 18:31, while the core's own `_dev_/run_mutations.py` was rewriting core source files in place (it writes each mutated file and then restores it). Five reruns and the full suite were green once the files were restored; which mutation was active is not recoverable |
 | **Published** | Never |
-| **Suite** | 87 tests in 7 files: 85 pass, 2 strict xfail (SRV-3, waiting on the core seam). `ruff` and `mypy --strict` are clean |
+| **Suite** | 95 tests in 8 files: 93 pass, 2 strict xfail (SRV-3, waiting on the core seam). `ruff` and `mypy --strict` are clean |
 | **Runtime** | Django 4.2.30 on CPython 3.9.6 |
 
 **The spec never names Django.** It covers this package only as a "framework variant" of the server
@@ -27,8 +27,10 @@ row is `delegated` with tier `-` and the core's own grade named in the evidence.
 
 ## What surfaced while writing this
 
-Nine things. The first four were Reviewer's read-only findings at `34a6a87`, and each was
-reproduced as a red test before it was fixed. The rest were found by running code, not by reading it.
+Twelve things. The first four were Reviewer's read-only findings at `34a6a87`, and each was
+reproduced as a red test before it was fixed. The tenth was measured in the FastAPI lane first, and the
+eleventh was asked for by Reviewer after the Rails lane reproduced it. The rest were found by running
+code, not by reading it.
 
 1. **The middleware decided capability itself (BIND-2, GATE-2).** `auto_flush and client.can_write`
    collapsed an unreachable authorize into "no" and called `clear_pending()`, discarding a queue the
@@ -66,6 +68,26 @@ reproduced as a red test before it was fixed. The rest were found by running cod
    `var.resolve(context)`; it is now narrowed to the core's function form `resolve(`. The probes also
    read the repo path rather than the imported package, so a mutation could not make one fire; they now
    read the package as imported.
+10. **`t()` and `{% t %}` cannot pass a placeholder named `category` or `phrase` (BIND-1).** The
+    binding's `t(phrase, category=None, **params)` shape takes both names for itself, while the
+    core's `translate` takes `params` as a dict and has no collision. `t("Browse {category}",
+    category=name)` silently uses the value as the catalog category: the placeholder is served
+    unfilled and the phrase queues under that category. Passing a category and `category=`
+    raises `TypeError`, which in a template is a render-time error. Measured in the FastAPI lane
+    first and confirmed here. It is not fixed, because the shape should be one decision across the
+    core and both bindings.
+11. **No response says it varies by locale (BIND-4).** The middleware negotiates from the cookie and
+    `Accept-Language`, so the same URL serves two languages, yet no response carries `Vary`. A shared
+    cache in front of the site can then serve one visitor's language to the next, as the Rails lane
+    reproduced on a CDN. Measured here by `test_gap_accept_language_negotiation_sends_no_vary_header`
+    and `test_gap_cookie_negotiation_sends_no_vary_header`, each with the control that the two
+    responses really differ. Not fixed: it is part of the ambient-locale question the operator is
+    ruling on.
+12. **A live core tree is not a pinned one.** One full run here went red on SRV-2, with both requests
+    receiving a mix of both languages, while the Python lane's mutation harness was rewriting core
+    source files in place. The test passed five times alone, and in the full suite, once the files were
+    restored. The failure is consistent with the core being mid-mutation, but which mutation was
+    active is not recoverable. The evidence that counts is Reviewer's run against a pinned core.
 
 ## Summary
 
@@ -74,14 +96,16 @@ table and these numbers disagree.
 
 | Status | Count | |
 |---|---|---|
-| `implemented` | 14 | GATE-3, REG-3, SRV-1, SRV-2, BIND-1–6, WIRE-5, CONF-1–3 |
-| `partial` | 1 | SRV-3: the binding half is done, but the order of events waits on the core seam |
+| `implemented` | 12 | GATE-3, REG-3, SRV-1, SRV-2, BIND-2, BIND-3, BIND-5, BIND-6, WIRE-5, CONF-1–3 |
+| `partial` | 3 | SRV-3: the binding half is done, but the order of events waits on the core seam. BIND-1: the `category`/`phrase` keyword collision waits on one signature decision across the core and both bindings. BIND-4: three locale-negotiation keys, and the missing `Vary` header, wait on the operator's ambient-locale ruling |
 | `delegated` | 42 | core-owned behaviour, each with an absence probe and a firing control |
 | `n/a (profile)` | 20 | browser-only rules |
 | `n/a (architecture)` | 2 | SRV-4, SRV-5 |
 
 **Delegated rows whose core row is not green at 8.0.1.** The binding cannot close these, and they are
-listed rather than left to be found:
+listed rather than left to be found. Reviewer's ruling: the checker resolves each delegated row against
+the core's current grade, so these count red for this lane until the core's rows are green. They stay
+`delegated` because the binding takes part in none of them:
 - GATE-6 and GATE-7: the core grades them `partial` because their report direction is vacuous on the
   server profile (HINT-2).
 - TOK-1 and TOK-2: the core files them against v8 and defers the 8.0.1 changes (the svg/math
@@ -146,15 +170,15 @@ listed rather than left to be found:
 | SSR-1 | n/a (profile: browser) | - | Where the browser SDK collects under the client strategy. This is a server binding |
 | SSR-2 | n/a (profile: browser) | - | The browser SDK degrading its strategy when a grant is configured. This is a server binding |
 | SSR-3 | n/a (profile: browser) | - | The browser SDK's server-strategy precondition. This is a server binding |
-| SRV-1 | implemented | n/a (pure) | `{% t %}`, the `t` filter and `t()` render the request locale's current translations into the served bytes. `test_SRV1_served_bytes_carry_the_request_locale` asserts on `response.content`; its control is a phrase absent from the catalog in the same render, which emits the base language and registers. `test_SRV1_a_streamed_render_carries_the_request_locale` covers the streamed path, which rendered the base language at `34a6a87`. Mutation M5 reddens it |
+| SRV-1 | implemented | n/a (pure) | `{% t %}`, the `t` filter and `t()` render the request locale's current translations into the served bytes. `test_SRV1_served_bytes_carry_the_request_locale` asserts on `response.content`; its control is a phrase absent from the catalog in the same render, which emits the base language and registers. `test_SRV1_a_streamed_render_carries_the_request_locale` covers the streamed path, which rendered the base language at `34a6a87`. Mutation M5 reddens it. These are the origin's bytes; that a shared cache can serve them to a visitor in another language, for want of a `Vary` header, is recorded under BIND-4 |
 | SRV-2 | implemented | n/a (pure) | The request locale lives in a `ContextVar`, never a process global, and the core keys its catalog by locale. `test_SRV2_concurrent_requests_never_see_each_others_locale` pins the interleave with two barriers. Mutation M6, a process-global locale, reddens it and `test_middleware_resets_locale_after_request`. With a single barrier this test stayed green under M6 (item 8) |
 | SRV-3 | partial | n/a (pure) | **Binding half done.** The flush and reset run on `request_finished` after the body is sent, never in the middleware. Evidence: `test_SRV3_registration_happens_only_after_the_response_is_complete` (red at `34a6a87`, reddened by mutation M3); `test_SRV3_a_streamed_body_is_complete_before_its_misses_are_sent` (streamed misses were never sent at `34a6a87`); and the read-only pair `test_SRV3_a_read_only_key_pushes_nothing` and `test_SRV3_control_a_write_key_on_the_same_render_pushes`. **Order still broken by the core.** Its debounce timer posts mid-render on a render longer than 0.4s, and its process-wide queue lets a concurrent request's post-response flush send a render still in progress. Ruling (c) on `838-django-push-to-100`: the core grows a request-scope seam. `test_SRV3_the_core_debounce_never_sends_before_the_response_is_complete` and `test_SRV3_another_requests_flush_never_sends_a_render_still_in_progress` are strict xfails that turn red when the seam lands. Waits on: the langsys-python request-scope seam |
 | SRV-4 | n/a (architecture: Django templates emit terminal HTML and nothing hydrates against it, so there is no catalog to hand off; live if this binding ever ships a client entry that hydrates) | - | 8.0.1 scopes SRV-4 to an SDK in a hydration hand-off and says a terminal-HTML server SDK rows it `n/a` structurally. The core rows it `not implemented` against v8, before that scoping |
 | SRV-5 | n/a (architecture: no tag here captures a rendered child subtree, since `{% t %}` takes its phrase as an argument; live if a block tag that captures its rendered body is added) | - | The once-per-subtree half belongs to a DOM-walking path. Here that is the core's `translate_page`, reached by reference only |
-| BIND-1 | implemented | n/a (pure) | Only timing and shape are adapted: the HTTP request's locale goes into the core's `LocaleSource`, streamed chunks render in that locale, and the core's public flush and reset run when Django ends a request. With the binding deleted, calling the core directly changes only where the locale comes from and when those two public calls happen. The one guarantee this binding had narrowed was undefined template arguments reaching the core as `""` (item 6). That is fixed, and mutation M9 reddens `test_ICU2_an_undefined_template_variable_is_an_absent_argument` and `test_ICU3_a_plural_over_an_undefined_variable_recovers_instead_of_leaking_its_source`. The other adaptations are covered by M5, which reddens `test_SRV1_a_streamed_render_carries_the_request_locale`, and M6, which reddens `test_SRV2_concurrent_requests_never_see_each_others_locale` |
+| BIND-1 | partial | n/a (pure) | Only timing and shape are adapted: the HTTP request's locale goes into the core's `LocaleSource`, streamed chunks render in that locale, and the core's public flush and reset run when Django ends a request. With the binding deleted, calling the core directly changes only where the locale comes from and when those two public calls happen, except for the collision below. One guarantee this binding had narrowed was undefined template arguments reaching the core as `""` (item 6). That is fixed, and mutation M9 reddens `test_ICU2_an_undefined_template_variable_is_an_absent_argument` and `test_ICU3_a_plural_over_an_undefined_variable_recovers_instead_of_leaking_its_source`. The other adaptations are covered by M5, which reddens `test_SRV1_a_streamed_render_carries_the_request_locale`, and M6, which reddens `test_SRV2_concurrent_requests_never_see_each_others_locale`. **Still narrowed:** the `t(phrase, category=None, **params)` shape cannot pass a placeholder named `category` or `phrase`, which the core's `params` dict can (item 10). The silent misroute is pinned by `test_gap_a_category_keyword_is_taken_as_the_catalog_category` and `test_gap_the_tag_takes_a_category_keyword_as_the_catalog_category`. The loud forms are pinned by `test_gap_a_category_beside_a_category_keyword_raises`, `test_gap_in_a_template_the_collision_raises_while_rendering` and `test_gap_a_phrase_keyword_collides_too`. `test_workaround_the_core_takes_any_parameter_name` is the control. Waits on: one signature decision across the core, FastAPI and Django |
 | BIND-2 | implemented | n/a (pure) | Probe `capability` matches nothing here and fires on `middleware.py` at `34a6a87`, where the defect itself lives. `test_BIND2_capability_unknown_holds_the_queue_through_the_binding` was red at `34a6a87`. Mutation M1, restoring the `can_write` branch in the request hook, reddens that test along with the `capability` and `queue-mutation` probes |
 | BIND-3 | implemented | n/a (pure) | Probe `network-client` shows there is no HTTP client here and fires on core `http.py`. Probe `scheduling` shows there is no timer, sleep, retry or backoff and fires on core `client.py`. Calling the core's public flush when Django ends a request is lifecycle timing (BIND-1), not scheduling, which is why the binding does not disable the core's debounce. Both probes run as `test_probe_matches_nothing_in_this_binding`, and their controls as `test_probe_fires_on_its_control` |
-| BIND-4 | implemented | n/a (pure) | `AUTO_FLUSH` is removed (item 4). Probe `binding-discovery-switch` fires on `conf.py` at `34a6a87`. `test_BIND4_no_binding_setting_switches_registration_off` was red at `34a6a87`, and mutation M7 reddens it, along with the `binding-discovery-switch` and `queue-mutation` probes. The remaining keys: `API_KEY`, `PROJECT_ID`, `API_URL` and `BASE_LOCALE` are core constructor arguments, and `SUPPORTED` is an argument to the core's `detect_preferred_locale`. `QUERY_PARAM`, `COOKIE_NAME` and `COOKIE_MAX_AGE` only configure where an HTTP request carries the core's locale value, not product behaviour. If the fleet reads BIND-4 as zero added keys, those three become fixed defaults. Flagged |
+| BIND-4 | partial | n/a (pure) | `AUTO_FLUSH` is removed (item 4). Probe `binding-discovery-switch` fires on `conf.py` at `34a6a87`. `test_BIND4_no_binding_setting_switches_registration_off` was red at `34a6a87`, and mutation M7 reddens it, along with the `binding-discovery-switch` and `queue-mutation` probes. The remaining keys: `API_KEY`, `PROJECT_ID`, `API_URL` and `BASE_LOCALE` are core constructor arguments, and `SUPPORTED` is an argument to the core's `detect_preferred_locale`. `QUERY_PARAM`, `COOKIE_NAME` and `COOKIE_MAX_AGE` only configure where an HTTP request carries the core's locale value, not product behaviour. **Pending the operator's ruling** on the ambient-locale question, which Reviewer routed together with the Rails lane's CDN cross-serve: as ruled for Rails, the three keys stay and this row is partial until then. **No `Vary` header** (item 11): `test_gap_accept_language_negotiation_sends_no_vary_header` and `test_gap_cookie_negotiation_sends_no_vary_header` show the same URL serving two languages with neither response carrying `Vary`. Waits on: the operator's ambient-locale ruling |
 | BIND-5 | implemented | n/a (pure) | Probe `cache` matches nothing here and fires on core `catalog.py`. No lookup is memoised here, so presence cannot be lost in this layer. The single shared client is an instance holder, not a lookup cache. The probe runs as `test_probe_matches_nothing_in_this_binding` |
 | BIND-6 | implemented | n/a (pure) | `test_BIND6_public_names_are_django_idioms_over_core_values` pins `__all__` to six names and asserts that `t` mirrors the core's own alias. `test_BIND6_the_core_is_reachable_by_reference_not_through_a_wrapper` asserts that `get_client()` returns the core instance itself. The tag is a `SimpleNode` subclass, which is a Django idiom and not a new behaviour name |
 | GRANT-1 | n/a (profile: browser) | - | A grant lends write capability to a browser session, and a server already holds a key. This binding sets no header of any kind (probe `auth-header`), so it never sends `X-Write-Grant` |
@@ -201,19 +225,33 @@ package as imported, so a mutated copy is what they probe.
 
 ## Gaps, ranked by cost
 
-1. **SRV-3: registration can land before a slow or concurrent response completes.** The binding half
+1. **No `Vary` header, so a shared cache can serve the wrong language.** The middleware negotiates
+   from the cookie and `Accept-Language`, so one URL serves several languages, and no response says so.
+   Behind a CDN, or any shared cache that caches HTML, one visitor's language can be served to the
+   visitors after them on every page, which the Rails lane reproduced. The fix is one
+   `patch_vary_headers` call, but it belongs to the ambient-locale question the operator is ruling on.
+2. **BIND-1: a placeholder named `category` or `phrase` cannot pass through `t()` or `{% t %}`.**
+   The silent form costs most: `{% t "Browse {category}" category=cat.name %}` serves the
+   placeholder unfilled to every visitor and registers the phrase under a category named after the
+   value. The loud form, a category plus `category=`, is a render-time `TypeError`. Python callers
+   can pass the value through `get_client().translate(…, params={…})` (README); in a template the
+   only workaround is renaming the placeholder. A positional-only signature would silently
+   reroute today's `t("Save", category="UI")` calls, so the shape is one decision across the core
+   and both bindings, which Reviewer is taking to the Python lane.
+3. **SRV-3: registration can land before a slow or concurrent response completes.** The binding half
    is done. What remains is the core's debounce and its process-wide queue. The send never runs on the
    visitor's request thread, but a render that runs past 0.4s, or overlaps another request's end, can
    register before its own response is complete. That breaks the order of events SRV-3 legislates.
    Blocked on the core request-scope seam (ruling (c)). The two strict xfails flip when it lands.
-2. **Delegated rows whose core row is not green at 8.0.1.** GATE-6 and GATE-7 are `partial` in the core
+4. **Delegated rows whose core row is not green at 8.0.1 count red for this lane.** GATE-6 and GATE-7 are `partial` in the core
    for a report direction the server profile cannot exercise. TOK-1 and TOK-2 are deferred to 8.0.1 in
    the core. TOK-5's capture half is uncommitted there. All are core-side.
-3. **BIND-4 is read as "no product behaviour in binding config".** Three framework-shape keys remain:
-   `QUERY_PARAM`, `COOKIE_NAME` and `COOKIE_MAX_AGE`. If the fleet reads the rule as zero added keys,
-   they become fixed defaults. This is a small change, but it is a ruling rather than a defect.
-4. **The profile is derived, not named.** The spec covers Django only as a "framework variant". Every
+5. **BIND-4 waits on the operator's ambient-locale ruling.** `QUERY_PARAM`, `COOKIE_NAME` and
+   `COOKIE_MAX_AGE` stay until then, as ruled for Rails. If the ruling reads BIND-4 as zero added keys,
+   they become fixed defaults, which is a small change.
+6. **The profile is derived, not named.** The spec covers Django only as a "framework variant". Every
    `n/a` here rests on reading this package as a binding over a server core. Reviewer has flagged this
    to the operator.
-5. **The evidence ran against the core's working copy.** Its uncommitted edits sit on paths this suite
-   does not take, but a run against a committed core has not been recorded here.
+7. **Local evidence runs against a live core tree.** The core's uncommitted edits sit on paths this
+   suite does not take, but its own mutation harness rewrites source in place, and one local run went
+   red while it did (item 12). Reviewer's run against a pinned `c79fd57` is the authoritative one.
