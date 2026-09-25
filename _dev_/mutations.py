@@ -214,6 +214,60 @@ MUTATIONS: list[tuple[str, list[Edit]]] = [
             )
         ],
     ),
+    (
+        "M20 a label is guessed from the key",
+        [
+            (
+                "messages.py",
+                "        return str(field.label), True\n    return name, False\n",
+                "        return str(field.label), True\n"
+                "    from django.forms.utils import pretty_name\n\n"
+                "    return pretty_name(name), False\n",
+            )
+        ],
+    ),
+    (
+        "M21 the template is Django's rendered message",
+        [
+            (
+                "messages.py",
+                "    return code, with_label(template, label), "
+                "({marker: value} if marker else {})\n",
+                "    return code, str(error.messages[0]), ({marker: value} if marker else {})\n",
+            )
+        ],
+    ),
+    (
+        "M22 a value bound is sized as text",
+        [
+            (
+                "messages.py",
+                "        return size_code(0, too), _VALUE[code], marker, _number(bound)\n",
+                '        return size_code("", too), _VALUE[code], marker, _number(bound)\n',
+            )
+        ],
+    ),
+    (
+        "M23 an unlabelled field is not reported",
+        [
+            (
+                "messages.py",
+                "        label, declared = _label(form_class, name, field)\n"
+                "        if not declared:\n",
+                "        label, declared = _label(form_class, name, field)\n        if False:\n",
+            )
+        ],
+    ),
+    (
+        "M24 an entry is rendered by looking its message up",
+        [
+            (
+                "templatetags/langsys.py",
+                "    return get_client().render_server_message(entry)\n",
+                "    return get_client().translate(entry['message'], category='Errors')\n",
+            )
+        ],
+    ),
 ]
 
 

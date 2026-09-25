@@ -12,6 +12,8 @@
 
     <html {% langsys_resolved %}>
 
+    {% for entry in form|langsys_errors %}{% t_message entry %}{% endfor %}
+
 Output is auto-escaped by Django like any template variable. A keyword argument whose variable
 does not exist reaches the SDK as missing rather than as ``""``, so its interpolation recovery
 shows the gap (``{name}``) instead of an empty value or the raw ICU source.
@@ -31,6 +33,7 @@ from langsys.exceptions import ApiError, ConfigurationError, NetworkError
 from ..client import get_client
 from ..client import t as _translate
 from ..locale import get_current_locale
+from ..messages import entries_from_form
 
 register = template.Library()
 
@@ -110,3 +113,16 @@ def resolved_marker() -> SafeString:
     if canonicalize_locale(locale) == canonicalize_locale(base):
         return SafeString("")
     return SafeString("data-ls-resolved")
+
+
+@register.filter(name="langsys_errors")
+def langsys_errors(form: Any) -> list[dict[str, Any]]:
+    """A bound form's errors as server-message entries (MSG-9), for ``{% t_message %}``."""
+    return entries_from_form(form, client=get_client())
+
+
+@register.simple_tag(name="t_message")
+def t_message(entry: dict[str, Any]) -> str:
+    """Render an entry in the request's locale: its template's translation, filled from its params,
+    or its ``message`` when the catalog has none (MSG-5). ``message`` is never a lookup key."""
+    return get_client().render_server_message(entry)

@@ -21,6 +21,7 @@ from typing import Optional
 
 import langsys
 import pytest
+from langsys.messages import WORDINGS
 
 import langsys_django
 
@@ -188,6 +189,13 @@ PROBES = (
         # the core a failed rule's code, template and params.
         r"\b(fill_template|template_markers|check_template|resolve_server_messages"
         r"|to_server_message|LABEL_MARKERS)\b|'Errors'",
+        (("core", "messages.py"),),
+    ),
+    Probe(
+        "wordings-copy",
+        ("MSG-2",),
+        # The spec's MSG-2 table sentences come from the core's WORDINGS, never a local copy.
+        "|".join(re.escape(template) for _, template in WORDINGS.values()),
         (("core", "messages.py"),),
     ),
     Probe(

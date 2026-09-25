@@ -75,6 +75,40 @@ the category. In Python, pass the value through the SDK:
 `get_client().translate("Browse {category}", category="UI", params={"category": name})`. In a
 template, rename the placeholder.
 
+## Validation errors as translatable messages
+
+A failed form's errors become Langsys server messages: whole-sentence templates built from the
+validators that failed, each with the field's label written in, and only numbers and dates left as
+`{markers}`.
+
+```python
+from langsys_django.messages import error_response
+
+form = SignupForm(request.POST)
+if not form.is_valid():
+    return error_response(form)   # 422: {"status": false, "error": {..., "errors": [entry, ...]}}
+```
+
+In a template, render them in the request's locale:
+
+```django
+{% for entry in form|langsys_errors %}<li>{% t_message entry %}</li>{% endfor %}
+```
+
+Labels come from a form field's `label`, a `ModelForm`'s `Meta.labels`, or the model field's
+`verbose_name`; declare one for every validated field, or the field's key ends up in the sentence.
+For a custom validator or `clean` method, raise `message_error(code, template)` and name its
+templates with `@declares(...)`.
+
+List every template ahead of time, and register the ones Langsys doesn't have yet. The command
+exits non-zero, naming the form, the field and the fix, for anything it can't list, so it can gate CI:
+
+```bash
+python manage.py langsys_messages --provider myapp.langsys:templates [--register]
+```
+
+where `templates()` returns `declared_templates([SignupForm, ...])` from `langsys_django.messages`.
+
 ## How the locale is resolved
 
 `LangsysMiddleware` asks the SDK which locale to serve, trying in order:
