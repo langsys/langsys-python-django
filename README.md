@@ -47,6 +47,16 @@ In templates:
 A keyword argument whose variable doesn't exist is passed to the SDK as *missing*, not as an
 empty string, so the gap stays visible (`Hello, {name}!`) instead of rendering `Hello, !`.
 
+Put `{% langsys_resolved %}` on your layout's root element:
+
+```django
+<html {% langsys_resolved %}>
+```
+
+When a page renders in a locale other than the project's base, the root gets a `data-ls-resolved`
+attribute, so a Langsys browser SDK on the same page never mistakes the translated text for new
+source text. A page in the base locale stays unmarked, and its text stays discoverable.
+
 In Python (views, etc.):
 
 ```python

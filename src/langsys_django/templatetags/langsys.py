@@ -10,6 +10,8 @@
     {{ "Save"|t }}
     {{ "Save"|t:"UI" }}
 
+    <html {% langsys_resolved %}>
+
 Output is auto-escaped by Django like any template variable. A keyword argument whose variable
 does not exist reaches the SDK as missing rather than as ``""``, so its interpolation recovery
 shows the gap (``{name}``) instead of an empty value or the raw ICU source.
@@ -22,8 +24,13 @@ from typing import Any, Optional
 
 from django import template
 from django.template.library import SimpleNode, parse_bits
+from django.utils.safestring import SafeString
+from langsys import canonicalize_locale
+from langsys.exceptions import ApiError, ConfigurationError, NetworkError
 
+from ..client import get_client
 from ..client import t as _translate
+from ..locale import get_current_locale
 
 register = template.Library()
 
@@ -79,3 +86,27 @@ def do_t(parser: Any, token: Any) -> _TranslateNode:
 @register.filter(name="t")
 def t_filter(phrase: str, category: Optional[str] = None) -> str:
     return _translate(phrase, category)
+
+
+@register.simple_tag(name="langsys_resolved")
+def resolved_marker() -> SafeString:
+    """A bare ``data-ls-resolved`` for the element a layout puts it on, usually ``<html>``, when
+    this request renders in a locale other than the project's base (GATE-10). Presence is what a
+    reader acts on, and a bare marker means the same as one carrying the locale.
+
+    Text ``{% t %}`` prints has no element of its own, so the layout's root is where a page states
+    that it is already output in a resolved locale; a browser SDK loaded on the page then records
+    nothing inside it rather than taking translated text for source. A render in the base locale is
+    source and stays unmarked, as does one whose project locales cannot be read, because the SDK
+    then serves the configured base locale.
+    """
+    locale = get_current_locale()
+    if not locale:
+        return SafeString("")
+    try:
+        base = get_client().project.base_locale
+    except (NetworkError, ApiError, ConfigurationError):
+        return SafeString("")
+    if canonicalize_locale(locale) == canonicalize_locale(base):
+        return SafeString("")
+    return SafeString("data-ls-resolved")

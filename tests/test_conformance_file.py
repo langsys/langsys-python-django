@@ -20,17 +20,14 @@ from tests.test_probes import PROBES
 REPO = pathlib.Path(__file__).resolve().parents[1]
 FILE = REPO / "CONFORMANCE.md"
 LANGSYS2 = REPO.parent / "langsys2"
-SPEC_COMMIT = "a1b7568c7ebcc53d074d30665e2195c122ea6978"
-SPEC_BLOB = "b0474afba2c9c1639baa8da219fa6a441b3e1c2f"
+SPEC_COMMIT = "cd5468c765c67764a0e08c434d41413ead3678dc"
+SPEC_BLOB = "abe122cf5346f92a0474b627d49451e6de9cd761"
 
 SPEC_REVISION_ROW = (
-    "| **Spec revision read** | langsys2 a1b7568c…, docs/sdk-spec.mdx blob "
-    "b0474afba2c9c1639baa8da219fa6a441b3e1c2f |"
+    "| **Spec revision read** | langsys2 cd5468c7…, docs/sdk-spec.mdx blob "
+    "abe122cf5346f92a0474b627d49451e6de9cd761 |"
 )
-PROFILES_ROW = (
-    "| **Profiles** | server, binding, all — binding over langsys-python, per the spec's per-SDK "
-    "profile table |"
-)
+PROFILES_ROW = "| **Profiles** | server, binding — derived: binding over langsys-python |"
 TABLE_HEADER = "| Rule | Status | Tier | Evidence |"
 BINDING_PROFILES = {"server", "binding", "all"}
 

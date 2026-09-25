@@ -146,7 +146,9 @@ PROBES = (
     Probe(
         "identity-stamping",
         ("MARK-1", "MARK-2", "MARK-3", "MARK-4"),
-        r"data-ls-|data-langsys-|\bstamp_\w+",
+        # Identity markers only: `data-ls-resolved` is GATE-10's marker, which this binding
+        # writes on purpose.
+        r"data-(?:ls|langsys)-(?:phrase|contentblock|category)\b|\bstamp_\w+",
         (("core", "client.py"),),
     ),
     Probe(
@@ -197,7 +199,7 @@ PROBES = (
     ),
     Probe(
         "snapshot",
-        ("SNAP-1", "SNAP-3"),
+        ("SNAP-1", "SNAP-2", "SNAP-3"),
         r"(?i)snapshot",
         (("synthetic", "catalog = load_snapshot('catalog.snapshot.json')"),),
     ),

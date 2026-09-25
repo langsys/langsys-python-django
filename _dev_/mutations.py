@@ -193,6 +193,27 @@ MUTATIONS: list[tuple[str, list[Edit]]] = [
             )
         ],
     ),
+    (
+        "M18 a base-locale render is marked resolved",
+        [
+            (
+                "templatetags/langsys.py",
+                "    if canonicalize_locale(locale) == canonicalize_locale(base):\n"
+                '        return SafeString("")\n',
+                "",
+            )
+        ],
+    ),
+    (
+        "M19 no render is ever marked resolved",
+        [
+            (
+                "templatetags/langsys.py",
+                '    return SafeString("data-ls-resolved")\n',
+                '    return SafeString("")\n',
+            )
+        ],
+    ),
 ]
 
 
