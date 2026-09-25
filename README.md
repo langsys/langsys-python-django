@@ -109,6 +109,16 @@ python manage.py langsys_messages --provider myapp.langsys:templates [--register
 
 where `templates()` returns `declared_templates([SignupForm, ...])` from `langsys_django.messages`.
 
+With Django REST framework (`pip install langsys-django[drf]`), set the exception handler:
+
+```python
+REST_FRAMEWORK = {"EXCEPTION_HANDLER": "langsys_django.drf.exception_handler"}
+```
+
+A failed serializer, or a request body that isn't valid JSON, then answers `400` with the same
+envelope, each entry's `field` a dotted path such as `items.1.name`. For the listing command, a
+provider returns `langsys_django.drf.declared_templates([SignupSerializer, ...])`.
+
 ## How the locale is resolved
 
 `LangsysMiddleware` asks the SDK which locale to serve, trying in order:

@@ -268,6 +268,53 @@ MUTATIONS: list[tuple[str, list[Edit]]] = [
             )
         ],
     ),
+    (
+        "M25 a DRF label is the bound field's humanised one",
+        [
+            (
+                "drf.py",
+                '    given = getattr(field, "_kwargs", {}).get("label")\n',
+                '    given = getattr(field, "label", None)\n',
+            )
+        ],
+    ),
+    (
+        "M26 a DRF template is DRF's rendered text",
+        [
+            (
+                "drf.py",
+                "    return code, with_label(template, label), "
+                "({marker: value} if marker else {})\n",
+                "    return code, str(detail), ({marker: value} if marker else {})\n",
+            )
+        ],
+    ),
+    (
+        "M27 a nested value that is not an object is worded as a format error",
+        [
+            (
+                "drf.py",
+                '        return WORDINGS["object_type"][0], '
+                'with_label(WORDINGS["object_type"][1], label), {}\n',
+                "        return FORMAT[0], with_label(FORMAT[1], label), {}\n",
+            )
+        ],
+    ),
+    (
+        "M28 an unparseable body is left to DRF",
+        [("drf.py", "    if isinstance(exc, ParseError):\n", "    if False:\n")],
+    ),
+    (
+        "M29 a validator's own sentence is replaced by DRF's wording",
+        [
+            (
+                "drf.py",
+                '    if wording is None or (code == "invalid" and not _own_invalid(field, detail, '
+                "active)):\n",
+                "    if wording is None:\n",
+            )
+        ],
+    ),
 ]
 
 

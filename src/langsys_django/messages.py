@@ -67,21 +67,31 @@ CHOICE = ("invalid_option", "The selected :attribute is invalid.")
 NOT_FOUND = ("not_found", "The selected :attribute is invalid.")
 LIST = ("invalid_type", "The :attribute must be a list.")
 
+EMAIL = ("invalid_format", "The :attribute must be a valid email address.")
+URL = ("invalid_format", "The :attribute must be a valid URL.")
+UUID_ = ("invalid_format", "The :attribute must be a valid UUID.")
+WHOLE = ("invalid_type", "The :attribute must be a whole number.")
+NUMBER = ("invalid_type", "The :attribute must be a number.")
+DATE = ("invalid_format", "The :attribute must be a valid date.")
+JSON_VALUE = ("invalid_format", "The :attribute must be valid JSON.")
+IMAGE = ("invalid_format", "The :attribute must be an image.")
+FILE = ("invalid_type", "The :attribute must be a file.")
+
 #: A field's own `invalid`, by field type. Order matters: Django's FloatField and DecimalField are
 #: IntegerFields, and an ImageField is a FileField.
 _INVALID: tuple[tuple[type, tuple[str, str]], ...] = (
-    (forms.EmailField, ("invalid_format", "The :attribute must be a valid email address.")),
-    (forms.URLField, ("invalid_format", "The :attribute must be a valid URL.")),
-    (forms.UUIDField, ("invalid_format", "The :attribute must be a valid UUID.")),
-    (forms.FloatField, ("invalid_type", "The :attribute must be a number.")),
-    (forms.DecimalField, ("invalid_type", "The :attribute must be a number.")),
-    (forms.IntegerField, ("invalid_type", "The :attribute must be a whole number.")),
-    (forms.DateTimeField, ("invalid_format", "The :attribute must be a valid date.")),
-    (forms.DateField, ("invalid_format", "The :attribute must be a valid date.")),
-    (forms.TimeField, ("invalid_format", "The :attribute must be a valid date.")),
-    (forms.JSONField, ("invalid_format", "The :attribute must be valid JSON.")),
-    (forms.ImageField, ("invalid_format", "The :attribute must be an image.")),
-    (forms.FileField, ("invalid_type", "The :attribute must be a file.")),
+    (forms.EmailField, EMAIL),
+    (forms.URLField, URL),
+    (forms.UUIDField, UUID_),
+    (forms.FloatField, NUMBER),
+    (forms.DecimalField, NUMBER),
+    (forms.IntegerField, WHOLE),
+    (forms.DateTimeField, DATE),
+    (forms.DateField, DATE),
+    (forms.TimeField, DATE),
+    (forms.JSONField, JSON_VALUE),
+    (forms.ImageField, IMAGE),
+    (forms.FileField, FILE),
 )
 _TEMPORAL = (forms.DateField, forms.DateTimeField, forms.TimeField)
 
