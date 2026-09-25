@@ -43,21 +43,11 @@ MUTATIONS: list[tuple[str, list[Edit]]] = [
     ),
     ("M2 no flush at the request boundary", [("client.py", "    client.flush_pending()\n", "")]),
     (
-        "M3 flush inline, before the response is returned",
-        [
-            (
-                "middleware.py",
-                "        return response\n\n    def _resolve",
-                "        client.flush_pending()\n        return response\n\n    def _resolve",
-            )
-        ],
-    ),
-    (
-        "M4 no reset at the request boundary",
+        "M3 no reset at the request boundary",
         [("client.py", "    client.reset_write_decision()\n", "")],
     ),
     (
-        "M5 streamed body not rendered in the request locale",
+        "M4 streamed body not rendered in the request locale",
         [
             (
                 "middleware.py",
@@ -68,7 +58,7 @@ MUTATIONS: list[tuple[str, list[Edit]]] = [
         ],
     ),
     (
-        "M6 process-global locale instead of a ContextVar",
+        "M5 process-global locale instead of a ContextVar",
         [
             (
                 "locale.py",
@@ -89,7 +79,7 @@ MUTATIONS: list[tuple[str, list[Edit]]] = [
         ],
     ),
     (
-        "M7 restore an AUTO_FLUSH switch",
+        "M6 restore an AUTO_FLUSH switch",
         [
             (
                 "client.py",
@@ -103,7 +93,7 @@ MUTATIONS: list[tuple[str, list[Edit]]] = [
         ],
     ),
     (
-        "M8 the t filter bypasses the core",
+        "M7 the t filter bypasses the core",
         [
             (
                 "templatetags/langsys.py",
@@ -113,12 +103,52 @@ MUTATIONS: list[tuple[str, list[Edit]]] = [
         ],
     ),
     (
-        "M9 the tag takes Django's empty string for a missing argument",
+        "M8 the tag takes Django's empty string for a missing argument",
         [("templatetags/langsys.py", "ignore_failures=True", "ignore_failures=False")],
     ),
     (
-        "M10 the settings API_URL never reaches the core",
+        "M9 the settings API_URL never reaches the core",
         [("client.py", "                    api_url=cfg.api_url,\n", "")],
+    ),
+    (
+        "M10 end the request scope when the middleware returns",
+        [
+            (
+                "middleware.py",
+                "        _end_scope_on_close(response, scope)\n",
+                "        end_request_scope(scope)\n",
+            )
+        ],
+    ),
+    (
+        "M11 no request scope: end it as soon as it opens",
+        [
+            (
+                "middleware.py",
+                "        scope = begin_request_scope()\n",
+                "        scope = begin_request_scope()\n        end_request_scope(scope)\n",
+            )
+        ],
+    ),
+    (
+        "M12 never end the request scope",
+        [
+            (
+                "middleware.py",
+                "        end_request_scope(scope)\n        close()\n",
+                "        close()\n",
+            )
+        ],
+    ),
+    (
+        "M13 a view that raises leaves its scope open",
+        [
+            (
+                "middleware.py",
+                "            if not served:\n                end_request_scope(scope)\n",
+                "",
+            )
+        ],
     ),
 ]
 

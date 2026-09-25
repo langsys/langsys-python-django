@@ -80,6 +80,7 @@ def test_middleware_locale_from_query_and_cookie_persist(httpx_mock, client):
         return HttpResponse("ok")
 
     response = LangsysMiddleware(view)(RequestFactory().get("/?locale=es-es"))
+    response.close()  # as a server does once the body is out; it ends the request's scope
     assert seen["locale"] == "es-ES"  # canonicalized
     assert response.cookies["langsys_locale"].value == "es-ES"  # explicit choice persisted
 
@@ -93,10 +94,11 @@ def test_middleware_locale_from_accept_language(httpx_mock, client):
 
     req = RequestFactory().get("/", HTTP_ACCEPT_LANGUAGE="es-ES,en;q=0.5")
     response = LangsysMiddleware(view)(req)
+    response.close()
     assert seen["locale"] == "es-ES"
     assert "langsys_locale" not in response.cookies  # detected, not an explicit choice
 
 
 def test_middleware_resets_locale_after_request(httpx_mock, client):
-    LangsysMiddleware(lambda r: HttpResponse("ok"))(RequestFactory().get("/?locale=es-ES"))
+    LangsysMiddleware(lambda r: HttpResponse("ok"))(RequestFactory().get("/?locale=es-ES")).close()
     assert get_current_locale() == ""  # context var reset

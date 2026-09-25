@@ -19,7 +19,7 @@ import httpx
 import pytest
 from django.http import HttpRequest, HttpResponse, StreamingHttpResponse
 from django.template import RequestContext, Template
-from django.test import Client
+from django.test import Client, RequestFactory
 from django.urls import path
 from langsys import LangsysClient
 from langsys.cache import MemoryCache
@@ -28,6 +28,7 @@ from langsys.client import DEFAULT_DEBOUNCE_SECONDS
 from langsys_django import t
 from langsys_django.client import reset_client, set_client
 from langsys_django.locale import ContextVarLocaleSource
+from langsys_django.middleware import LangsysMiddleware
 
 pytestmark = [
     pytest.mark.urls("tests.test_request_lifecycle"),
@@ -44,17 +45,6 @@ ITEMS = re.compile(r"https://api\.test/api/translatable-items")
 EVENTS: list[str] = []
 INTERLEAVE: dict[str, Optional[threading.Barrier]] = {"locales-set": None, "translated": None}
 SCOPES: dict[str, threading.Event] = {}
-
-#: SRV-3's order of events is broken by the core, not by this binding: the core's debounce timer
-#: and its process-wide queue can each send a request's misses before that request's response is
-#: complete. Ruled (c) on 838-django-push-to-100 — the core grows a request-scope seam. Strict,
-#: and restricted to an assertion failure, so these turn red the moment the seam lands and the
-#: SRV-3 row can flip; a harness failure still errors instead of hiding as an expected failure.
-AWAITS_CORE_SCOPE_SEAM = pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason="SRV-3 order of events waits on the langsys-python request-scope seam",
-)
 
 
 # -- views ----------------------------------------------------------------------
@@ -73,10 +63,10 @@ def queue_another_miss(request: HttpRequest) -> HttpResponse:
 
 def queue_a_miss_then_keep_rendering(request: HttpRequest) -> HttpResponse:
     t("A phrase the catalog has never seen", "UI")
-    # A render that outlasts the debounce: wait for the core to send, bounded, rather than
-    # racing a sleep against its timer. Once the core defers inside a request scope nothing
-    # is sent here, the wait simply times out, and the order below comes out right.
-    SCOPES["posted"].wait(timeout=DEFAULT_DEBOUNCE_SECONDS * 5)
+    # A render that outlasts the debounce. Inside the request's scope the core sends nothing
+    # here, so this bounded wait for a send times out and the render carries on; a send that did
+    # happen would release it at once and come first in the recorded order.
+    SCOPES["posted"].wait(timeout=DEFAULT_DEBOUNCE_SECONDS * 3)
     EVENTS.append("rendered")
     return HttpResponse("ok")
 
@@ -87,6 +77,17 @@ def record_a_miss_and_hold_the_render(request: HttpRequest) -> HttpResponse:
     SCOPES["release"].wait(timeout=5)
     EVENTS.append("held-rendered")
     return HttpResponse("ok")
+
+
+def stream_a_miss_then_keep_streaming(request: HttpRequest) -> StreamingHttpResponse:
+    def body():
+        yield t("Streamed and never seen", "UI")
+        # A stream that outlasts the debounce, waiting on a send exactly as the slow render does.
+        SCOPES["posted"].wait(timeout=DEFAULT_DEBOUNCE_SECONDS * 3)
+        yield "|done"
+        EVENTS.append("body-complete")
+
+    return StreamingHttpResponse(body())
 
 
 def stream_a_render(request: HttpRequest) -> StreamingHttpResponse:
@@ -132,6 +133,7 @@ urlpatterns = [
     path("slow-miss/", queue_a_miss_then_keep_rendering),
     path("held-render/", record_a_miss_and_hold_the_render),
     path("stream/", stream_a_render),
+    path("slow-stream/", stream_a_miss_then_keep_streaming),
     path("render/", render_template),
     path("interleave/", interleave),
     path("every-entry-point/", render_every_entry_point),
@@ -298,14 +300,12 @@ def test_SRV3_a_streamed_body_is_complete_before_its_misses_are_sent(httpx_mock,
     assert registered_phrases(httpx_mock) == ["Streamed and never seen"]
 
 
-@AWAITS_CORE_SCOPE_SEAM
 def test_SRV3_the_core_debounce_never_sends_before_the_response_is_complete(
     httpx_mock, langsys_debounced
 ):
-    """The settings-built client runs the core's default debounce, whose timer fires on its
-    own thread shortly after the last miss — before the response is complete whenever the
-    render runs on past it. Every other test here runs with the debounce off, so this is the
-    only one that sees the core's own send path inside a request."""
+    """The settings-built client runs the core's default debounce. A render that runs on past it
+    must still not have its miss sent before the response is complete: the request's scope holds
+    it until the response is closed."""
     httpx_mock.add_response(url=AUTH, json=authorize(), is_reusable=True)
     httpx_mock.add_response(url=TRANS, json=catalog({"UI": {}}), is_reusable=True)
     accept_items(httpx_mock)
@@ -316,11 +316,10 @@ def test_SRV3_the_core_debounce_never_sends_before_the_response_is_complete(
     assert EVENTS == ["rendered", "response-returned", "posted"]
 
 
-@AWAITS_CORE_SCOPE_SEAM
 def test_SRV3_another_requests_flush_never_sends_a_render_still_in_progress(httpx_mock, langsys):
-    """The contract sent to the core with ruling (c): a miss recorded inside a request scope is
-    sent by NO flush before that scope's own response is complete — including the post-response
-    flush of a concurrent request, which a process-wide queue lets reach it."""
+    """A miss recorded inside a request's scope is sent by no flush before that request's response is
+    complete, including the post-response flush of a concurrent request, which would otherwise
+    drain the process-wide queue."""
     httpx_mock.add_response(url=AUTH, json=authorize(), is_reusable=True)
     httpx_mock.add_response(url=TRANS, json=catalog({"UI": {}}), is_reusable=True)
     accept_items_naming_phrases(httpx_mock)
@@ -340,6 +339,38 @@ def test_SRV3_another_requests_flush_never_sends_a_render_still_in_progress(http
     assert held_miss in EVENTS, "the held request's miss was never sent"
     held_response = len(EVENTS) - 1 - EVENTS[::-1].index("response-returned")
     assert EVENTS.index(held_miss) > held_response, EVENTS
+
+
+def test_SRV3_a_streamed_body_holds_its_misses_until_it_is_complete(httpx_mock, langsys_debounced):
+    """A streamed body renders after the middleware has returned, so the request's scope outlives
+    ``__call__`` and ends only when the response is closed."""
+    httpx_mock.add_response(url=AUTH, json=authorize(), is_reusable=True)
+    httpx_mock.add_response(url=TRANS, json=catalog({"UI": {}}), is_reusable=True)
+    accept_items(httpx_mock)
+    SCOPES["posted"] = threading.Event()
+
+    response = Client().get("/slow-stream/?locale=es-ES")
+    b"".join(response.streaming_content)
+
+    assert EVENTS == ["response-returned", "body-complete", "posted"]
+
+
+def test_SRV3_a_view_that_raises_still_releases_its_misses(httpx_mock, langsys):
+    """With no response to close, the scope ends when the exception leaves the middleware, so
+    the request's misses go out with the next flush instead of waiting for the process to exit."""
+    httpx_mock.add_response(url=AUTH, json=authorize(), is_reusable=True)
+    httpx_mock.add_response(url=TRANS, json=catalog({"UI": {}}), is_reusable=True)
+    accept_items(httpx_mock)
+
+    def failing_view(request: HttpRequest) -> HttpResponse:
+        t("Recorded before the view failed", "UI")
+        raise RuntimeError("the view failed")
+
+    with pytest.raises(RuntimeError):
+        LangsysMiddleware(failing_view)(RequestFactory().get("/?locale=es-ES"))
+    langsys.flush_pending()
+
+    assert registered_phrases(httpx_mock) == ["Recorded before the view failed"]
 
 
 def test_SRV3_a_read_only_key_pushes_nothing(httpx_mock, langsys):

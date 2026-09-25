@@ -76,15 +76,16 @@ returned — so a single shared client is safe across concurrent requests.
 
 ## When phrases are registered
 
-Phrases the catalog doesn't have yet are queued while the page renders. When Django fires
-`request_finished` — after the response, streamed bodies included, has been sent — the app asks
-the SDK to flush that queue and to forget the request's write decision, so the decision never
-carries over to the next request.
+Phrases the catalog doesn't have yet are queued while the page renders. The middleware runs each
+request inside one of the SDK's request scopes, so nothing a request discovers is sent before its
+response, streamed bodies included, has gone out: not by the SDK's debounce, and not by another
+request finishing first. When Django then fires `request_finished`, the app asks the SDK to flush
+the queue and to forget the request's write decision, so the decision never carries over to the
+next request.
 
 Whether anything is sent is the SDK's call, not this package's: the server decides per session
 whether it may write. A read-only key sends nothing, and if the API can't be reached the queue is
-kept and retried rather than dropped. The SDK also sends on a short debounce of its own, so on a
-render that runs long a batch can still go out before the response finishes.
+kept and retried rather than dropped.
 
 Outside a request — a management command, a Celery task — the SDK's debounce and exit hook
 apply; call `get_client().flush_pending()` at the end of long-running work.
