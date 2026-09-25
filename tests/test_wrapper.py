@@ -72,33 +72,21 @@ def test_template_output_is_escaped(httpx_mock, client):
     assert out == "&lt;b&gt;x&lt;/b&gt;"
 
 
-def test_middleware_locale_from_query_and_cookie_persist(httpx_mock, client):
-    seen = {}
-
-    def view(request):
-        seen["locale"] = get_current_locale()
-        return HttpResponse("ok")
-
-    response = LangsysMiddleware(view)(RequestFactory().get("/?locale=es-es"))
-    response.close()  # as a server does once the body is out; it ends the request's scope
-    assert seen["locale"] == "es-ES"  # canonicalized
-    assert response.cookies["langsys_locale"].value == "es-ES"  # explicit choice persisted
-
-
-def test_middleware_locale_from_accept_language(httpx_mock, client):
-    seen = {}
-
-    def view(request):
-        seen["locale"] = get_current_locale()
-        return HttpResponse("ok")
-
-    req = RequestFactory().get("/", HTTP_ACCEPT_LANGUAGE="es-ES,en;q=0.5")
-    response = LangsysMiddleware(view)(req)
-    response.close()
-    assert seen["locale"] == "es-ES"
-    assert "langsys_locale" not in response.cookies  # detected, not an explicit choice
-
-
 def test_middleware_resets_locale_after_request(httpx_mock, client):
+    httpx_mock.add_response(
+        url=re.compile(r"https://api\.test/api/authorize-project/"),
+        json={
+            "status": True,
+            "data": {
+                "id": "proj-1",
+                "title": "T",
+                "base_locale": "en-us",
+                "target_locales": ["es-es"],
+                "default_locales": {},
+                "key_type": "read",
+                "langsys_settings": {"translatable_items": {"batch_limit": 200}},
+            },
+        },
+    )
     LangsysMiddleware(lambda r: HttpResponse("ok"))(RequestFactory().get("/?locale=es-ES")).close()
     assert get_current_locale() == ""  # context var reset

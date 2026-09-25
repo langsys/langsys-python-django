@@ -27,7 +27,6 @@ LANGSYS = {
     "API_KEY": "…",        # or the LANGSYS_API_KEY env var
     "PROJECT_ID": "…",     # or LANGSYS_PROJECT_ID
     "BASE_LOCALE": "en-US",
-    "SUPPORTED": ["en-US", "es-ES"],   # optional locale allow-list for detection
 }
 ```
 
@@ -68,11 +67,28 @@ template, rename the placeholder.
 
 ## How the locale is resolved
 
-`LangsysMiddleware` picks the request locale in order: `?locale=` (persisted to a cookie),
-then the `langsys_locale` cookie, then the `Accept-Language` header (matched against
-`SUPPORTED`). It exposes that locale to translations for the request via a context
-variable — including a streamed response body, which renders after the middleware has
-returned — so a single shared client is safe across concurrent requests.
+`LangsysMiddleware` asks the SDK which locale to serve, trying in order:
+
+1. the URL: the `?locale=` query parameter, or the language prefix when your URLconf uses
+   `i18n_patterns`;
+2. the `langsys_locale` cookie;
+3. the `Accept-Language` header;
+
+and otherwise the project's base locale. Every candidate is checked against the locales your
+project serves, and one it doesn't serve is skipped. The response gets the `Vary` headers the
+choice depended on (`Cookie`, `Accept-Language`), so a CDN or other shared cache never serves one
+visitor's language to another. A locale taken from the URL needs none, because the URL is already
+the cache key.
+
+The middleware never writes the cookie: set it wherever your app lets a visitor pick a language.
+
+The locale is exposed to translations for the whole request through a context variable, including
+a streamed response body, which renders after the middleware has returned. So a single shared
+client is safe across concurrent requests.
+
+The middleware neither reads nor sets Django's own active language, so where it sits relative to
+Django's `LocaleMiddleware` doesn't change the locale Langsys serves. `i18n_patterns` URLs still
+need Django's `LocaleMiddleware` to route.
 
 ## When phrases are registered
 
@@ -97,10 +113,8 @@ apply; call `get_client().flush_pending()` at the end of long-running work.
 | `API_KEY` / `PROJECT_ID` | env `LANGSYS_*` | credentials |
 | `API_URL` | `https://api.langsys.dev/api` | backend host — point it at a test double to run without the real API. Read when the client is first built, so call `langsys_django.reset_client()` after changing it |
 | `BASE_LOCALE` | project base | source-string locale |
-| `SUPPORTED` | `[]` | locale allow-list for `Accept-Language` matching |
-| `QUERY_PARAM` | `locale` | query param that switches locale |
-| `COOKIE_NAME` | `langsys_locale` | persisted-choice cookie |
-| `COOKIE_MAX_AGE` | `31536000` | cookie lifetime (seconds) |
+| `QUERY_PARAM` | `locale` | query parameter that carries a locale in the URL |
+| `COOKIE_NAME` | `langsys_locale` | cookie your app keeps a visitor's locale in |
 
 ## Releasing
 

@@ -150,6 +150,49 @@ MUTATIONS: list[tuple[str, list[Edit]]] = [
             )
         ],
     ),
+    (
+        "M14 the response carries no Vary",
+        [
+            (
+                "middleware.py",
+                "        if choice.vary:\n            patch_vary_headers(response, choice.vary)\n",
+                "",
+            )
+        ],
+    ),
+    (
+        "M15 the cookie outranks the URL",
+        [
+            (
+                "middleware.py",
+                "            url=self._url_locale(request),\n"
+                "            cookie=request.COOKIES.get(self._cfg.cookie_name),\n",
+                "            url=request.COOKIES.get(self._cfg.cookie_name),\n"
+                "            cookie=self._url_locale(request),\n",
+            )
+        ],
+    ),
+    (
+        "M16 the chosen locale is written back to a cookie",
+        [
+            (
+                "middleware.py",
+                "        return response\n\n    def _url_locale",
+                "        response.set_cookie(self._cfg.cookie_name, locale)\n"
+                "        return response\n\n    def _url_locale",
+            )
+        ],
+    ),
+    (
+        "M17 any path prefix counts as a locale",
+        [
+            (
+                "middleware.py",
+                "        return get_language_from_path(request.path_info) if prefixed else None\n",
+                "        return get_language_from_path(request.path_info)\n",
+            )
+        ],
+    ),
 ]
 
 

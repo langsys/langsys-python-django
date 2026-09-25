@@ -60,8 +60,10 @@ PROBES = (
     ),
     Probe(
         "cache",
-        ("GATE-4", "CACHE-1", "BIND-5"),
-        r"(?i)cache|memoi[sz]",
+        ("GATE-4", "CACHE-1", "CACHE-2", "BIND-5"),
+        # `django.utils.cache` is Django's HTTP cache-header helper (`patch_vary_headers`),
+        # not a store of lookup results.
+        r"(?i)(?<!utils\.)cache|memoi[sz]",
         (("core", "catalog.py"),),
     ),
     Probe(
@@ -81,7 +83,7 @@ PROBES = (
     ),
     Probe(
         "catalog-read",
-        ("CAT-1", "CAT-2", "GATE-7"),
+        ("CAT-1", "CAT-2", "GATE-7", "REG-13"),
         # `resolve(` as a function only: the core reads its catalog with `resolve(catalog, ...)`,
         # while `var.resolve(context)` is Django resolving a template variable.
         r"\b(get_translations|lookup_block|_catalog|catalog)\b|(?<![.\w])resolve\(",
@@ -131,19 +133,19 @@ PROBES = (
     ),
     Probe(
         "interpolation",
-        ("ICU-1", "ICU-2", "ICU-3", "ICU-4", "ICU-5", "TOK-5"),
+        ("ICU-1", "ICU-2", "ICU-3", "ICU-4", "ICU-5", "ICU-6", "TOK-5"),
         r"(?i)\binterpolat\w*|\bplural\b|messageformat|\bbabel\b|\.format\(",
         (("core", "interpolate.py"),),
     ),
     Probe(
         "tokenizer",
-        ("TOK-1", "TOK-2", "TOK-3", "TOK-4"),
+        ("TOK-1", "TOK-2", "TOK-3", "TOK-4", "TOK-6"),
         r"\b(lxml|etree|tokeniz\w*|extract_phrases|translatable_attributes)\b",
-        (("core", "client.py"),),
+        (("core", "html/parser.py"),),
     ),
     Probe(
         "identity-stamping",
-        ("MARK-1", "MARK-2"),
+        ("MARK-1", "MARK-2", "MARK-3", "MARK-4"),
         r"data-ls-|data-langsys-|\bstamp_\w+",
         (("core", "client.py"),),
     ),
@@ -176,6 +178,28 @@ PROBES = (
         ("OBS-1",),
         r"\b(logger|logging|warn\w*)\b",
         (("pre-fix", "src/langsys_django/middleware.py"), ("core", "client.py")),
+    ),
+    Probe(
+        "message-internals",
+        ("MSG-1", "MSG-4", "MSG-6", "MSG-8", "MSG-11"),
+        # Building, filling, checking or filing an entry is the core's; the binding may only hand
+        # the core a failed rule's code, template and params.
+        r"\b(fill_template|template_markers|check_template|resolve_server_messages"
+        r"|to_server_message|LABEL_MARKERS)\b|'Errors'",
+        (("core", "messages.py"),),
+    ),
+    Probe(
+        "migration-files",
+        ("MIG-1", "MIG-2", "MIG-3", "MIG-4", "MIG-5", "MIG-6", "MIG-7", "MIG-9"),
+        # Reading a legacy translation file, and resolving a key against it, is the core's.
+        r"(?i)\bpolib\b|\byaml\b|\bmsgid\b|\bmsgstr\b|\.po['\"]",
+        (("synthetic", "entries = polib.pofile('locale/es/LC_MESSAGES/django.po')"),),
+    ),
+    Probe(
+        "snapshot",
+        ("SNAP-1", "SNAP-3"),
+        r"(?i)snapshot",
+        (("synthetic", "catalog = load_snapshot('catalog.snapshot.json')"),),
     ),
     Probe(
         "binding-discovery-switch",

@@ -202,7 +202,7 @@ def authorize(key_type: str = "write", write_enabled: Optional[bool] = True) -> 
         "id": "proj-1",
         "title": "T",
         "base_locale": "en-us",
-        "target_locales": [],
+        "target_locales": ["es-es", "it-it", "de-de"],
         "default_locales": {},
         "key_type": key_type,
         "langsys_settings": {"translatable_items": {"batch_limit": 200}},
@@ -509,6 +509,7 @@ def test_SRV2_concurrent_requests_never_see_each_others_locale(httpx_mock, langs
     before either has returned and reset it. A single barrier was measured green against a
     process-global locale: the request that finished first restored the other's value on its
     way out, so the shared value was never observed."""
+    httpx_mock.add_response(url=AUTH, json=authorize(), is_reusable=True)
     serve_catalogs(
         httpx_mock,
         {"it-it": {"UI": {"Pricing": "Prezzi"}}, "de-de": {"UI": {"Pricing": "Preise"}}},
@@ -547,45 +548,3 @@ def test_GATE7_every_entry_point_reaches_the_core_queue(httpx_mock, langsys):
         "From the helper",
         "From the tag",
     ]
-
-
-# -- locale negotiation and shared caches ------------------------------------------------------
-#
-# Measured for Reviewer's ambient-locale question, which the operator is ruling on together with a
-# CDN cross-serve the Rails lane reproduced. These pin the behaviour as it is: the same URL serves a
-# different language per cookie or Accept-Language, and no response says so to a shared cache. Once
-# ruled, the fix is one ``patch_vary_headers`` call and these are replaced.
-
-
-def test_gap_accept_language_negotiation_sends_no_vary_header(httpx_mock, langsys, settings):
-    settings.LANGSYS = {**settings.LANGSYS, "SUPPORTED": ["en-US", "it-IT", "de-DE"]}
-    httpx_mock.add_response(url=AUTH, json=authorize(), is_reusable=True)
-    serve_catalogs(
-        httpx_mock,
-        {"it-it": {"UI": {"Pricing": "Prezzi"}}, "de-de": {"UI": {"Pricing": "Preise"}}},
-    )
-    accept_items(httpx_mock)
-
-    italian = Client().get("/render/", HTTP_ACCEPT_LANGUAGE="it-IT")
-    german = Client().get("/render/", HTTP_ACCEPT_LANGUAGE="de-DE")
-
-    assert italian.content != german.content, "control: one URL must serve two languages"
-    assert not italian.has_header("Vary") and not german.has_header("Vary")
-
-
-def test_gap_cookie_negotiation_sends_no_vary_header(httpx_mock, langsys):
-    httpx_mock.add_response(url=AUTH, json=authorize(), is_reusable=True)
-    serve_catalogs(
-        httpx_mock,
-        {"it-it": {"UI": {"Pricing": "Prezzi"}}, "de-de": {"UI": {"Pricing": "Preise"}}},
-    )
-    accept_items(httpx_mock)
-    italian_visitor, german_visitor = Client(), Client()
-    italian_visitor.cookies["langsys_locale"] = "it-IT"
-    german_visitor.cookies["langsys_locale"] = "de-DE"
-
-    italian = italian_visitor.get("/render/")
-    german = german_visitor.get("/render/")
-
-    assert italian.content != german.content, "control: one URL must serve two languages"
-    assert not italian.has_header("Vary") and not german.has_header("Vary")

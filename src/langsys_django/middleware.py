@@ -1,8 +1,11 @@
 """Request-locale middleware.
 
-Resolves the locale for each request (``?locale=`` -> cookie -> ``Accept-Language``), exposes
-it to translations for the duration of the request — including a streamed body rendered after
-this middleware has returned — and persists an explicit choice to a cookie.
+Resolves the locale for each request through the SDK's ``resolve_request_locale``: the URL (the
+query parameter, or the language prefix of ``i18n_patterns``), then the app's locale cookie, then
+``Accept-Language``, then the project's base locale, each validated against the locales the
+project serves. The response gets the ``Vary`` headers that choice depended on. The locale is
+exposed to translations for the whole request, including a streamed body rendered after this
+middleware has returned. No cookie is written: storing a visitor's choice is the app's.
 
 Each request runs inside one of the core's request scopes, so a phrase discovered while serving
 it is held until its response has been sent — by the core's debounce, an explicit flush and every
@@ -14,16 +17,14 @@ decision (see ``client._finish_request``). Nothing is registered on the visitor'
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Iterable, Iterator
-from typing import Any, Callable
+from typing import Any, Callable, Optional
 
+from django.conf import settings
+from django.conf.urls.i18n import is_language_prefix_patterns_used
 from django.http import HttpRequest, HttpResponse
-from langsys import (
-    LangsysClient,
-    RequestScope,
-    begin_request_scope,
-    canonicalize_locale,
-    end_request_scope,
-)
+from django.utils.cache import patch_vary_headers
+from django.utils.translation import get_language_from_path
+from langsys import RequestScope, begin_request_scope, end_request_scope
 
 from .client import get_client
 from .conf import get_settings
@@ -36,8 +37,12 @@ class LangsysMiddleware:
         self._cfg = get_settings()
 
     def __call__(self, request: HttpRequest) -> HttpResponse:
-        client = get_client()
-        locale, persist = self._resolve(request, client)
+        choice = get_client().resolve_request_locale(
+            url=self._url_locale(request),
+            cookie=request.COOKIES.get(self._cfg.cookie_name),
+            accept_language=request.META.get("HTTP_ACCEPT_LANGUAGE"),
+        )
+        locale = choice.locale
         token = set_current_locale(locale) if locale else None
         scope = begin_request_scope()
         served = False
@@ -55,25 +60,22 @@ class LangsysMiddleware:
 
         if locale and response.streaming:
             _stream_in_locale(response, locale)
-        if persist and locale:
-            response.set_cookie(
-                self._cfg.cookie_name,
-                locale,
-                max_age=self._cfg.cookie_max_age,
-                samesite="Lax",
-            )
+        if choice.vary:
+            patch_vary_headers(response, choice.vary)
         return response
 
-    def _resolve(self, request: HttpRequest, client: LangsysClient) -> tuple[str, bool]:
-        query = request.GET.get(self._cfg.query_param)
+    def _url_locale(self, request: HttpRequest) -> Optional[str]:
+        """The locale the URL carries: the query parameter, or an ``i18n_patterns`` prefix.
+
+        A path prefix counts only when the URLconf routes by one, which is the check Django's own
+        ``LocaleMiddleware`` makes, so a path that merely starts with ``/de/`` is not a locale.
+        """
+        query: Optional[str] = request.GET.get(self._cfg.query_param)
         if query:
-            return canonicalize_locale(query), True  # explicit choice -> persist
-        cookie = request.COOKIES.get(self._cfg.cookie_name)
-        if cookie:
-            return canonicalize_locale(cookie), False
-        header = request.META.get("HTTP_ACCEPT_LANGUAGE")
-        detected = client.detect_preferred_locale(header, self._cfg.supported or None)
-        return (detected or ""), False
+            return query
+        urlconf = getattr(request, "urlconf", None) or settings.ROOT_URLCONF
+        prefixed, _ = is_language_prefix_patterns_used(urlconf)
+        return get_language_from_path(request.path_info) if prefixed else None
 
 
 def _end_scope_on_close(response: Any, scope: RequestScope) -> None:
