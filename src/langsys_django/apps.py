@@ -9,6 +9,7 @@ class LangsysDjangoConfig(AppConfig):
     verbose_name = "Langsys"
 
     def ready(self) -> None:
-        from .client import _finish_request
+        from .client import _finish_request, seed_from_settings
 
         request_finished.connect(_finish_request, dispatch_uid="langsys_django.finish_request")
+        seed_from_settings()

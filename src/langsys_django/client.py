@@ -31,8 +31,21 @@ def get_client() -> LangsysClient:
                     api_url=cfg.api_url,
                     base_locale=cfg.base_locale,
                     locale_source=ContextVarLocaleSource(),
+                    legacy_files=list(cfg.legacy_files) or None,
                 )
     return _client
+
+
+def seed_from_settings() -> None:
+    """Load the ``SNAPSHOT`` setting's catalog snapshot into the shared client (SNAP-2).
+
+    Called when Django starts, so the first render has the snapshot's translations with no network
+    call. The core refuses a snapshot edited after export, or exported for another project, and
+    that refusal stops startup, naming the reason.
+    """
+    snapshot = get_settings().snapshot
+    if snapshot:
+        get_client().load_snapshot(snapshot)
 
 
 def set_client(client: LangsysClient) -> None:

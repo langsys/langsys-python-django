@@ -348,6 +348,66 @@ MUTATIONS: list[tuple[str, list[Edit]]] = [
             ),
         ],
     ),
+    (
+        "M33 gettext looks a message up before % fills it",
+        [
+            (
+                "translation.py",
+                "    if any(_NAMED.search(message) for message in messages):\n",
+                "    if False:\n",
+            ),
+        ],
+    ),
+    (
+        "M34 a pgettext context is not the category",
+        [
+            (
+                "translation.py",
+                "    return _now(LegacyText(message, category=context), message)\n",
+                "    return _now(LegacyText(message), message)\n",
+            ),
+        ],
+    ),
+    (
+        "M35 blocktranslate fills nothing",
+        [
+            (
+                "templatetags/langsys_i18n.py",
+                "category=category, params=values or None",
+                "category=category, params=None",
+            ),
+        ],
+    ),
+    (
+        "M36 LEGACY_FILES never reaches the core",
+        [
+            (
+                "client.py",
+                "                    legacy_files=list(cfg.legacy_files) or None,\n",
+                "",
+            ),
+        ],
+    ),
+    (
+        "M37 the snapshot is not seeded at startup",
+        [
+            (
+                "apps.py",
+                "        seed_from_settings()\n",
+                "",
+            ),
+        ],
+    ),
+    (
+        "M38 a blocktranslate value is not escaped",
+        [
+            (
+                "templatetags/langsys_i18n.py",
+                "            return template.base.render_value_in_context(found, context)\n",
+                "            return found\n",
+            ),
+        ],
+    ),
 ]
 
 

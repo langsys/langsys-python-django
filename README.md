@@ -178,6 +178,46 @@ kept and retried rather than dropped.
 Outside a request — a management command, a Celery task — the SDK's debounce and exit hook
 apply; call `get_client().flush_pending()` at the end of long-running work.
 
+## Migrating from gettext
+
+An app that translates with Django's gettext can move to Langsys without rewriting its calls.
+`langsys_django.translation` and the `langsys_i18n` template library are drop-ins for Django's own
+names; switch the imports and the `{% load %}` lines, and the calls stay as they are:
+
+```python
+from langsys_django.translation import gettext as _, ngettext, pgettext
+
+_("Hello %(name)s") % {"name": user.name}
+ngettext("%(count)s item", "%(count)s items", n) % {"count": n}
+pgettext("cart", "Remove")
+```
+
+```django
+{% load langsys_i18n %}
+{% translate "Save" %}
+{% blocktranslate with name=user.name %}Hello {{ name }}{% endblocktranslate %}
+```
+
+The `*_lazy` forms, `npgettext`, `gettext_noop`, and the `trans`/`blocktrans` tag names are there
+too, and the tags take every option Django's do. Django's own `i18n` tags and translation
+functions are untouched.
+
+Point `LEGACY_FILES` at your source-language `.po` files, and a message already in them registers
+the same phrase, under its `msgctxt` as the category, whether it reaches Langsys through these
+functions or through `t()`. A message that isn't in them is source text: each placeholder the call
+fills becomes a Langsys `{name}` placeholder, and one it leaves unfilled stays as written, just as
+Django would print it. A `pgettext` context is the phrase's category.
+
+A message with named placeholders is looked up once `%` has filled it, so `_("…")` returns a lazy
+value until then; one with no placeholders returns the translated text at once.
+
+## Starting from a catalog snapshot
+
+Set `SNAPSHOT` to a catalog snapshot exported with `python -m langsys.snapshot`, and Django loads
+it into the client at startup: the first render has its translations with no network call, and a
+phrase it doesn't hold is fetched as usual. A snapshot edited after export, or exported for
+another project, is refused, and startup stops with the reason. Re-export it to refresh it.
+
 ## Settings reference
 
 | Key | Default | Purpose |
@@ -188,6 +228,8 @@ apply; call `get_client().flush_pending()` at the end of long-running work.
 | `QUERY_PARAM` | `locale` | query parameter that carries a locale in the URL |
 | `COOKIE_NAME` | `langsys_locale` | cookie your app keeps a visitor's locale in |
 | `RESPONSE_KEY` | `langsys_errors` | key a failed form's or serializer's entries sit under, beside Django's or DRF's own errors |
+| `LEGACY_FILES` | none | source translation files (`.po`, or plain JSON) for gettext calls and `t()` to resolve keys against; each a path or a `{"path", "format", "namespace"}` mapping |
+| `SNAPSHOT` | none | catalog snapshot loaded when Django starts |
 
 ## Releasing
 

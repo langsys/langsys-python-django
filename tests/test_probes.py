@@ -134,7 +134,10 @@ PROBES = (
     Probe(
         "interpolation",
         ("ICU-1", "ICU-2", "ICU-3", "ICU-4", "ICU-5", "ICU-6", "TOK-5"),
-        r"(?i)\binterpolat\w*|\bplural\b|messageformat|\bbabel\b|\.format\(",
+        # ICU's own constructs, not the word "plural": ngettext's plural form is Django's
+        # argument, which this binding hands the core as `plural=`.
+        r"(?i)\binterpolat\w*|,\s*plural\s*,|\bplural_rules?\b|messageformat|\bbabel\b"
+        r"|\.format\(",
         (("core", "interpolate.py"),),
     ),
     Probe(
@@ -215,8 +218,10 @@ PROBES = (
     Probe(
         "snapshot",
         ("SNAP-1", "SNAP-2", "SNAP-3"),
-        r"(?i)snapshot",
-        (("synthetic", "catalog = load_snapshot('catalog.snapshot.json')"),),
+        # Reading, checking or writing a snapshot is the core's; naming the file to seed at boot
+        # and calling the core's `load_snapshot` is this binding's decision (SNAP-2).
+        r"langsys-catalog-snapshot|\bchecksum\b|\bgenerated_at\b|\bSnapshot\b",
+        (("core", "snapshot.py"),),
     ),
     Probe(
         "binding-discovery-switch",

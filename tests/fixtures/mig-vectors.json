@@ -1,0 +1,907 @@
+{
+ "": "Legacy-key migration vectors (spec MIG family), shared across Langsys SDKs. AUTHORED in langsys-js-typescript, the owner named by the spec; other lanes vendor this file by blob and never edit their copy.",
+ "spec_blob": "33bbc4095ef2d13a55926b71045a7094f6b9706a (langsys2 9b23f3d8, specVersion 8.2.14)",
+ "core_formats": {
+  "js": [
+   "i18next",
+   "vue-i18n",
+   "plain"
+  ],
+  "php": [
+   "laravel",
+   "plain"
+  ],
+  "python": [
+   "gettext",
+   "plain"
+  ],
+  "ruby": [
+   "rails-i18n",
+   "gettext",
+   "plain"
+  ]
+ },
+ "core_entry_points": {
+  "js": [
+   "t",
+   "vue-i18n",
+   "i18next"
+  ],
+  "php": [
+   "t",
+   "__",
+   "trans_choice"
+  ],
+  "python": [
+   "t",
+   "gettext",
+   "ngettext",
+   "pgettext",
+   "blocktranslate"
+  ],
+  "ruby": [
+   "t",
+   "I18n.t"
+  ]
+ },
+ "how_to_row_against_it": {
+  "scope": "Every row names its format. A core runs the rows whose format is in its own set (core_formats, from MIG-7) and records the rest n/a (format); for file rows it expects a refusal instead, see refusals. A calls row runs where its entry_point is one of the core's own (core_entry_points) and is recorded n/a (entry point) elsewhere: entry points belong to a core, not to a format, so a core that reads gettext files need not have Django's gettext() call. Expected values in rows outside the JS set are derived from MIG-2 and MIG-4 and confirmed by the lane that runs them; a lane that disagrees records it and the owner reconciles, never the vendored copy.",
+  "value_conversion": "convert(value, format) must yield expected, with recognised as given. When recognised is false the phrase is the value exactly as written, and the SDK warns.",
+  "plural_forms": "Forms keyed by category — i18next's suffix pairs, a rails-i18n count hash (zero, 0, 1, one, ..., other), a gettext msgid/msgid_plural pair — convert to expected. Exact branches first ascending, then zero, one, two, few, many, other; the number is # inside branches.",
+  "calls": "A literal miss (MIG-2) through entry_point converts to expected. same_phrase_as names a row that must register the identical phrase. category, when present, is the category the call registers under.",
+  "resolution": "Resolving key against files (in order) yields expected: the phrase, the category (category_arg, when given, is passed by the call and wins), the answering file and recognised; null is the miss. A file with no format is plain.",
+  "refusals": "A core whose set does not include format refuses the file at load with an error naming the format and the file. A .mo file is refused by every core, naming its .po."
+ },
+ "value_conversion": [
+  {
+   "id": "plain-double-brace",
+   "format": "plain",
+   "value": "Hello {{name}}",
+   "expected": "Hello {name}",
+   "recognised": true
+  },
+  {
+   "id": "plain-single-brace",
+   "format": "plain",
+   "value": "Hello {name}",
+   "expected": "Hello {name}",
+   "recognised": true
+  },
+  {
+   "id": "plain-laravel-colon",
+   "format": "plain",
+   "value": "Hello :name",
+   "expected": "Hello {name}",
+   "recognised": true
+  },
+  {
+   "id": "plain-rails-percent-brace",
+   "format": "plain",
+   "value": "Hello %{name}",
+   "expected": "Hello {name}",
+   "recognised": true
+  },
+  {
+   "id": "plain-python-named-s",
+   "format": "plain",
+   "value": "Hello %(name)s",
+   "expected": "Hello {name}",
+   "recognised": true
+  },
+  {
+   "id": "plain-python-named-d",
+   "format": "plain",
+   "value": "%(count)d left",
+   "expected": "{count} left",
+   "recognised": true
+  },
+  {
+   "id": "plain-double-percent-literal",
+   "format": "plain",
+   "value": "Save 50%% today",
+   "expected": "Save 50% today",
+   "recognised": true
+  },
+  {
+   "id": "plain-double-percent-before-name",
+   "format": "plain",
+   "value": "%%{name} stays text",
+   "expected": "%{name} stays text",
+   "recognised": true
+  },
+  {
+   "id": "plain-colon-inside-word-literal",
+   "format": "plain",
+   "value": "Note:done",
+   "expected": "Note:done",
+   "recognised": true
+  },
+  {
+   "id": "plain-case-transform-verbatim",
+   "format": "plain",
+   "value": "Hello :Name",
+   "expected": "Hello :Name",
+   "recognised": false
+  },
+  {
+   "id": "plain-rails-formatted-verbatim",
+   "format": "plain",
+   "value": "Total %<amount>.2f",
+   "expected": "Total %<amount>.2f",
+   "recognised": false
+  },
+  {
+   "id": "plain-python-formatted-verbatim",
+   "format": "plain",
+   "value": "Total %(amount).2f",
+   "expected": "Total %(amount).2f",
+   "recognised": false
+  },
+  {
+   "id": "plain-positional-verbatim",
+   "format": "plain",
+   "value": "Hello %s",
+   "expected": "Hello %s",
+   "recognised": false
+  },
+  {
+   "id": "plain-pipe-verbatim",
+   "format": "plain",
+   "value": "car | cars",
+   "expected": "car | cars",
+   "recognised": false
+  },
+  {
+   "id": "vue-two-forms",
+   "format": "vue-i18n",
+   "value": "car | cars",
+   "expected": "{count, plural, =1 {car} other {cars}}",
+   "recognised": true
+  },
+  {
+   "id": "vue-three-forms",
+   "format": "vue-i18n",
+   "value": "no cars | one car | {count} cars",
+   "expected": "{count, plural, =0 {no cars} =1 {one car} other {# cars}}",
+   "recognised": true
+  },
+  {
+   "id": "vue-n-is-the-count",
+   "format": "vue-i18n",
+   "value": "{n} apple | {n} apples",
+   "expected": "{count, plural, =1 {# apple} other {# apples}}",
+   "recognised": true
+  },
+  {
+   "id": "vue-named-placeholder-kept",
+   "format": "vue-i18n",
+   "value": "{name} has one car | {name} has {count} cars",
+   "expected": "{count, plural, =1 {{name} has one car} other {{name} has # cars}}",
+   "recognised": true
+  },
+  {
+   "id": "vue-four-forms-verbatim",
+   "format": "vue-i18n",
+   "value": "a | b | c | d",
+   "expected": "a | b | c | d",
+   "recognised": false
+  },
+  {
+   "id": "vue-no-pipe",
+   "format": "vue-i18n",
+   "value": "Hello {name}",
+   "expected": "Hello {name}",
+   "recognised": true
+  },
+  {
+   "id": "i18next-double-brace",
+   "format": "i18next",
+   "value": "Hello {{name}}",
+   "expected": "Hello {name}",
+   "recognised": true
+  },
+  {
+   "id": "i18next-spaced-double-brace",
+   "format": "i18next",
+   "value": "Hello {{ name }}",
+   "expected": "Hello {name}",
+   "recognised": true
+  },
+  {
+   "id": "i18next-pipe-verbatim",
+   "format": "i18next",
+   "value": "car | cars",
+   "expected": "car | cars",
+   "recognised": false
+  },
+  {
+   "id": "laravel-pipe-verbatim",
+   "format": "laravel",
+   "value": "car | cars",
+   "expected": "car | cars",
+   "recognised": false
+  },
+  {
+   "id": "laravel-ranges",
+   "format": "laravel",
+   "value": "{0} none|[1,*] :count items",
+   "expected": "{count, plural, =0 {none} other {# items}}",
+   "recognised": true
+  },
+  {
+   "id": "laravel-two-count-forms",
+   "format": "laravel",
+   "value": ":count apple|:count apples",
+   "expected": "{count, plural, one {# apple} other {# apples}}",
+   "recognised": true
+  },
+  {
+   "id": "laravel-uncovered-range-verbatim",
+   "format": "laravel",
+   "value": "{0} none|[2,*] :count items",
+   "expected": "{0} none|[2,*] :count items",
+   "recognised": false
+  }
+ ],
+ "plural_forms": [
+  {
+   "id": "i18next-one-other",
+   "format": "i18next",
+   "forms": {
+    "one": "{{count}} item",
+    "other": "{{count}} items"
+   },
+   "expected": "{count, plural, one {# item} other {# items}}",
+   "recognised": true
+  },
+  {
+   "id": "i18next-zero-one-other-canonical-order",
+   "format": "i18next",
+   "forms": {
+    "other": "{{count}} items",
+    "zero": "No items",
+    "one": "One item"
+   },
+   "expected": "{count, plural, zero {No items} one {One item} other {# items}}",
+   "recognised": true
+  },
+  {
+   "id": "i18next-no-other",
+   "format": "i18next",
+   "forms": {
+    "one": "{{count}} item"
+   },
+   "expected": null,
+   "recognised": false
+  },
+  {
+   "id": "rails-zero-one-other",
+   "format": "rails-i18n",
+   "forms": {
+    "zero": "No items",
+    "one": "%{count} item",
+    "other": "%{count} items"
+   },
+   "expected": "{count, plural, =0 {No items} one {# item} other {# items}}",
+   "recognised": true
+  },
+  {
+   "id": "rails-explicit-0-1",
+   "format": "rails-i18n",
+   "forms": {
+    "0": "No items",
+    "1": "One item",
+    "other": "%{count} items"
+   },
+   "expected": "{count, plural, =0 {No items} =1 {One item} other {# items}}",
+   "recognised": true
+  },
+  {
+   "id": "gettext-msgid-plural",
+   "format": "gettext",
+   "forms": {
+    "msgid": "%(count)s item",
+    "msgid_plural": "%(count)s items"
+   },
+   "expected": "{count, plural, =1 {# item} other {# items}}",
+   "recognised": true
+  }
+ ],
+ "calls": [
+  {
+   "id": "t-langsys-unconverted",
+   "entry_point": "t",
+   "format": null,
+   "text": "Hello {name}",
+   "params": {
+    "name": "Ada"
+   },
+   "expected": "Hello {name}",
+   "recognised": true
+  },
+  {
+   "id": "t-langsys-colon-unconverted",
+   "entry_point": "t",
+   "format": null,
+   "text": "Hello :name",
+   "params": {
+    "name": "Ada"
+   },
+   "expected": "Hello :name",
+   "recognised": true
+  },
+  {
+   "id": "laravel-underscore-passed-placeholder",
+   "entry_point": "__",
+   "format": "laravel",
+   "text": "Hello :name",
+   "params": {
+    "name": "Ada"
+   },
+   "expected": "Hello {name}",
+   "recognised": true,
+   "same_phrase_as": "t-langsys-unconverted"
+  },
+  {
+   "id": "laravel-underscore-pipe-verbatim",
+   "entry_point": "__",
+   "format": "laravel",
+   "text": "a | b",
+   "params": {},
+   "expected": "a | b",
+   "recognised": true
+  },
+  {
+   "id": "laravel-underscore-unpassed-colon-literal",
+   "entry_point": "__",
+   "format": "laravel",
+   "text": "Note:done",
+   "params": {},
+   "expected": "Note:done",
+   "recognised": true
+  },
+  {
+   "id": "laravel-underscore-case-transform-warns",
+   "entry_point": "__",
+   "format": "laravel",
+   "text": "Hello :Name",
+   "params": {
+    "name": "Ada"
+   },
+   "expected": "Hello :Name",
+   "recognised": false
+  },
+  {
+   "id": "laravel-trans-choice-ranges",
+   "entry_point": "trans_choice",
+   "format": "laravel",
+   "text": "{0} none|[1,*] :count items",
+   "params": {
+    "count": 3
+   },
+   "expected": "{count, plural, =0 {none} other {# items}}",
+   "recognised": true
+  },
+  {
+   "id": "rails-i18n-t-passed-placeholder",
+   "entry_point": "I18n.t",
+   "format": "rails-i18n",
+   "text": "Hello %{name}",
+   "params": {
+    "name": "Ada"
+   },
+   "expected": "Hello {name}",
+   "recognised": true,
+   "same_phrase_as": "t-langsys-unconverted"
+  },
+  {
+   "id": "django-gettext-named",
+   "entry_point": "gettext",
+   "format": "gettext",
+   "text": "Hello %(name)s",
+   "params": {
+    "name": "Ada"
+   },
+   "expected": "Hello {name}",
+   "recognised": true,
+   "same_phrase_as": "t-langsys-unconverted"
+  },
+  {
+   "id": "django-ngettext-pair",
+   "entry_point": "ngettext",
+   "format": "gettext",
+   "text": [
+    "%(count)s item",
+    "%(count)s items"
+   ],
+   "params": {
+    "count": 3
+   },
+   "expected": "{count, plural, =1 {# item} other {# items}}",
+   "recognised": true
+  },
+  {
+   "id": "django-pgettext-context-is-category",
+   "entry_point": "pgettext",
+   "format": "gettext",
+   "text": "Remove",
+   "params": {},
+   "expected": "Remove",
+   "recognised": true,
+   "category": "cart",
+   "context": "cart"
+  },
+  {
+   "id": "vue-bridge-pipe",
+   "entry_point": "vue-i18n",
+   "format": "vue-i18n",
+   "text": "car | cars",
+   "params": {
+    "count": 2
+   },
+   "expected": "{count, plural, =1 {car} other {cars}}",
+   "recognised": true
+  },
+  {
+   "id": "i18next-bridge-double-brace",
+   "entry_point": "i18next",
+   "format": "i18next",
+   "text": "Hello {{name}}",
+   "params": {
+    "name": "Ada"
+   },
+   "expected": "Hello {name}",
+   "recognised": true,
+   "same_phrase_as": "t-langsys-unconverted"
+  }
+ ],
+ "resolution": [
+  {
+   "id": "nested-key-resolves-by-path",
+   "files": [
+    {
+     "name": "en.json",
+     "data": {
+      "checkout": {
+       "submit": "Pay now",
+       "title": "Checkout for {{name}}"
+      },
+      "Welcome back.": "Welcome back.",
+      "cart.title": "Your cart"
+     }
+    }
+   ],
+   "key": "checkout.submit",
+   "expected": {
+    "phrase": "Pay now",
+    "category": "checkout",
+    "file": "en.json",
+    "recognised": true
+   }
+  },
+  {
+   "id": "nested-value-converted",
+   "files": [
+    {
+     "name": "en.json",
+     "data": {
+      "checkout": {
+       "submit": "Pay now",
+       "title": "Checkout for {{name}}"
+      },
+      "Welcome back.": "Welcome back.",
+      "cart.title": "Your cart"
+     }
+    }
+   ],
+   "key": "checkout.title",
+   "expected": {
+    "phrase": "Checkout for {name}",
+    "category": "checkout",
+    "file": "en.json",
+    "recognised": true
+   }
+  },
+  {
+   "id": "flat-sentence-key-has-no-category",
+   "files": [
+    {
+     "name": "en.json",
+     "data": {
+      "checkout": {
+       "submit": "Pay now",
+       "title": "Checkout for {{name}}"
+      },
+      "Welcome back.": "Welcome back.",
+      "cart.title": "Your cart"
+     }
+    }
+   ],
+   "key": "Welcome back.",
+   "expected": {
+    "phrase": "Welcome back.",
+    "category": null,
+    "file": "en.json",
+    "recognised": true
+   }
+  },
+  {
+   "id": "flat-dotted-key-names-its-category",
+   "files": [
+    {
+     "name": "en.json",
+     "data": {
+      "checkout": {
+       "submit": "Pay now",
+       "title": "Checkout for {{name}}"
+      },
+      "Welcome back.": "Welcome back.",
+      "cart.title": "Your cart"
+     }
+    }
+   ],
+   "key": "cart.title",
+   "expected": {
+    "phrase": "Your cart",
+    "category": "cart",
+    "file": "en.json",
+    "recognised": true
+   }
+  },
+  {
+   "id": "explicit-category-wins",
+   "files": [
+    {
+     "name": "en.json",
+     "data": {
+      "checkout": {
+       "submit": "Pay now",
+       "title": "Checkout for {{name}}"
+      },
+      "Welcome back.": "Welcome back.",
+      "cart.title": "Your cart"
+     }
+    }
+   ],
+   "key": "checkout.submit",
+   "category_arg": "Buttons",
+   "expected": {
+    "phrase": "Pay now",
+    "category": "Buttons",
+    "file": "en.json",
+    "recognised": true
+   }
+  },
+  {
+   "id": "miss-is-literal",
+   "files": [
+    {
+     "name": "en.json",
+     "data": {
+      "checkout": {
+       "submit": "Pay now",
+       "title": "Checkout for {{name}}"
+      },
+      "Welcome back.": "Welcome back.",
+      "cart.title": "Your cart"
+     }
+    }
+   ],
+   "key": "checkout.sumbit",
+   "expected": null,
+   "note": "The MIG-2 miss: the argument registers as literal source text, and the SDK warns at debug (MIG-6)."
+  },
+  {
+   "id": "key-string-never-the-phrase",
+   "files": [
+    {
+     "name": "en.json",
+     "data": {
+      "checkout": {
+       "submit": "Pay now",
+       "title": "Checkout for {{name}}"
+      },
+      "Welcome back.": "Welcome back.",
+      "cart.title": "Your cart"
+     }
+    }
+   ],
+   "key": "checkout.submit",
+   "expected": {
+    "phrase": "Pay now",
+    "category": "checkout",
+    "file": "en.json",
+    "recognised": true
+   },
+   "note": "MIG-3: the phrase is the value; the key string checkout.submit is never registered."
+  },
+  {
+   "id": "first-configured-file-wins",
+   "files": [
+    {
+     "name": "app.json",
+     "data": {
+      "nav": {
+       "home": "Home"
+      }
+     }
+    },
+    {
+     "name": "vendor.json",
+     "data": {
+      "nav": {
+       "home": "Start"
+      }
+     }
+    }
+   ],
+   "key": "nav.home",
+   "expected": {
+    "phrase": "Home",
+    "category": "nav",
+    "file": "app.json",
+    "recognised": true
+   },
+   "note": "duplicates() reports nav.home in app.json and vendor.json."
+  },
+  {
+   "id": "namespace-file",
+   "files": [
+    {
+     "name": "locales/en/cart.json",
+     "namespace": "cart",
+     "data": {
+      "items": {
+       "title": "Your cart"
+      }
+     }
+    }
+   ],
+   "key": "cart.items.title",
+   "expected": {
+    "phrase": "Your cart",
+    "category": "cart",
+    "file": "locales/en/cart.json",
+    "recognised": true
+   }
+  },
+  {
+   "id": "namespace-file-does-not-answer-other-keys",
+   "files": [
+    {
+     "name": "locales/en/cart.json",
+     "namespace": "cart",
+     "data": {
+      "items": {
+       "title": "Your cart"
+      }
+     }
+    }
+   ],
+   "key": "items.title",
+   "expected": null
+  },
+  {
+   "id": "i18next-suffix-pair",
+   "files": [
+    {
+     "name": "en.json",
+     "format": "i18next",
+     "data": {
+      "cart": {
+       "items_one": "{{count}} item",
+       "items_other": "{{count}} items"
+      }
+     }
+    }
+   ],
+   "key": "cart.items",
+   "expected": {
+    "phrase": "{count, plural, one {# item} other {# items}}",
+    "category": "cart",
+    "file": "en.json",
+    "recognised": true
+   }
+  },
+  {
+   "id": "i18next-top-level-suffix-pair",
+   "files": [
+    {
+     "name": "en.json",
+     "format": "i18next",
+     "data": {
+      "items_one": "{{count}} item",
+      "items_other": "{{count}} items"
+     }
+    }
+   ],
+   "key": "items",
+   "expected": {
+    "phrase": "{count, plural, one {# item} other {# items}}",
+    "category": null,
+    "file": "en.json",
+    "recognised": true
+   }
+  },
+  {
+   "id": "i18next-legacy-plural-suffix",
+   "files": [
+    {
+     "name": "en.json",
+     "format": "i18next",
+     "data": {
+      "item": "item",
+      "item_plural": "items"
+     }
+    }
+   ],
+   "key": "item",
+   "expected": {
+    "phrase": "{count, plural, one {item} other {items}}",
+    "category": null,
+    "file": "en.json",
+    "recognised": true
+   }
+  },
+  {
+   "id": "suffixes-do-not-pair-outside-i18next",
+   "files": [
+    {
+     "name": "en.json",
+     "format": "plain",
+     "data": {
+      "items_one": "one item"
+     }
+    }
+   ],
+   "key": "items",
+   "expected": null
+  },
+  {
+   "id": "vue-file-plural",
+   "files": [
+    {
+     "name": "en.json",
+     "format": "vue-i18n",
+     "data": {
+      "cart": {
+       "count": "no items | one item | {count} items"
+      }
+     }
+    }
+   ],
+   "key": "cart.count",
+   "expected": {
+    "phrase": "{count, plural, =0 {no items} =1 {one item} other {# items}}",
+    "category": "cart",
+    "file": "en.json",
+    "recognised": true
+   }
+  },
+  {
+   "id": "undeclared-json-pipe-verbatim",
+   "files": [
+    {
+     "name": "en.json",
+     "data": {
+      "cart": {
+       "count": "car | cars"
+      }
+     }
+    }
+   ],
+   "key": "cart.count",
+   "expected": {
+    "phrase": "car | cars",
+    "category": "cart",
+    "file": "en.json",
+    "recognised": false
+   },
+   "note": "Registered as written and warned, naming en.json and cart.count."
+  },
+  {
+   "id": "same-string-declared-vue-converts",
+   "files": [
+    {
+     "name": "en.json",
+     "format": "vue-i18n",
+     "data": {
+      "cart": {
+       "count": "car | cars"
+      }
+     }
+    }
+   ],
+   "key": "cart.count",
+   "expected": {
+    "phrase": "{count, plural, =1 {car} other {cars}}",
+    "category": "cart",
+    "file": "en.json",
+    "recognised": true
+   }
+  },
+  {
+   "id": "changed-value-is-a-new-phrase",
+   "files": [
+    {
+     "name": "en.json",
+     "data": {
+      "cta": {
+       "buy": "Buy it now"
+      }
+     }
+    }
+   ],
+   "key": "cta.buy",
+   "expected": {
+    "phrase": "Buy it now",
+    "category": "cta",
+    "file": "en.json",
+    "recognised": true
+   },
+   "note": "Against nested-key rows: a value edited in the file is a new phrase, with no reconciliation (MIG-6)."
+  }
+ ],
+ "refusals": [
+  {
+   "id": "php-array-file",
+   "file": {
+    "name": "lang/en/messages.php"
+   },
+   "format": "laravel",
+   "supported_by": [
+    "php"
+   ]
+  },
+  {
+   "id": "rails-yaml-file",
+   "file": {
+    "name": "config/locales/en.yml"
+   },
+   "format": "rails-i18n",
+   "supported_by": [
+    "ruby"
+   ]
+  },
+  {
+   "id": "gettext-po-file",
+   "file": {
+    "name": "locale/en/LC_MESSAGES/django.po"
+   },
+   "format": "gettext",
+   "supported_by": [
+    "python",
+    "ruby"
+   ]
+  },
+  {
+   "id": "gettext-mo-file",
+   "file": {
+    "name": "locale/en/LC_MESSAGES/django.mo"
+   },
+   "format": "gettext",
+   "supported_by": [],
+   "hint": "locale/en/LC_MESSAGES/django.po"
+  },
+  {
+   "id": "declared-foreign-format",
+   "file": {
+    "name": "en.json",
+    "format": "laravel"
+   },
+   "format": "laravel",
+   "supported_by": [
+    "php"
+   ]
+  },
+  {
+   "id": "declared-unknown-format",
+   "file": {
+    "name": "en.json",
+    "format": "yaml"
+   },
+   "format": "yaml",
+   "supported_by": []
+  }
+ ]
+}
