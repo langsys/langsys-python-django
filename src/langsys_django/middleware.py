@@ -1,11 +1,19 @@
 """Request-locale middleware.
 
-Resolves the locale for each request through the SDK's ``resolve_request_locale``: the URL (the
-query parameter, or the language prefix of ``i18n_patterns``), then the app's locale cookie, then
-``Accept-Language``, then the project's base locale, each validated against the locales the
-project serves. The response gets the ``Vary`` headers that choice depended on. The locale is
-exposed to translations for the whole request, including a streamed body rendered after this
-middleware has returned. No cookie is written: storing a visitor's choice is the app's.
+Serves each request in the locale Django resolved for it. Where the app runs Django's
+``LocaleMiddleware`` (placed before this one), ``request.LANGUAGE_CODE`` is that locale, and the SDK
+maps it to the project's form — ``es-ES`` and ``es_ES`` are ``es-es``, a bare ``es`` the project's
+default Spanish locale — serving the base locale for one the project does not serve. The app varies
+its responses on what Django decided, so nothing is added to ``Vary``.
+
+Where nothing resolved a locale, the SDK resolves it: the URL (the query parameter, or the language
+prefix of ``i18n_patterns``), then the app's locale cookie, then ``Accept-Language``, then the
+project's base locale, each validated against the locales the project serves. The response gets
+the ``Vary`` headers that choice depended on. No cookie is written: storing a visitor's choice is
+the app's.
+
+The locale is exposed to translations for the whole request, including a streamed body rendered
+after this middleware has returned.
 
 Each request runs inside one of the core's request scopes, so a phrase discovered while serving
 it is held until its response has been sent — by the core's debounce, an explicit flush and every
@@ -24,7 +32,7 @@ from django.conf.urls.i18n import is_language_prefix_patterns_used
 from django.http import HttpRequest, HttpResponse
 from django.utils.cache import patch_vary_headers
 from django.utils.translation import get_language_from_path
-from langsys import RequestScope, begin_request_scope, end_request_scope
+from langsys import LocaleChoice, RequestScope, begin_request_scope, end_request_scope
 
 from .client import get_client
 from .conf import get_settings
@@ -37,11 +45,7 @@ class LangsysMiddleware:
         self._cfg = get_settings()
 
     def __call__(self, request: HttpRequest) -> HttpResponse:
-        choice = get_client().resolve_request_locale(
-            url=self._url_locale(request),
-            cookie=request.COOKIES.get(self._cfg.cookie_name),
-            accept_language=request.META.get("HTTP_ACCEPT_LANGUAGE"),
-        )
+        choice = self._resolve(request)
         locale = choice.locale
         token = set_current_locale(locale) if locale else None
         scope = begin_request_scope()
@@ -63,6 +67,17 @@ class LangsysMiddleware:
         if choice.vary:
             patch_vary_headers(response, choice.vary)
         return response
+
+    def _resolve(self, request: HttpRequest) -> LocaleChoice:
+        """The locale Django resolved, when ``LocaleMiddleware`` ran; otherwise the SDK's own."""
+        framework = getattr(request, "LANGUAGE_CODE", None)
+        if framework:
+            return get_client().resolve_request_locale(framework=framework)
+        return get_client().resolve_request_locale(
+            url=self._url_locale(request),
+            cookie=request.COOKIES.get(self._cfg.cookie_name),
+            accept_language=request.META.get("HTTP_ACCEPT_LANGUAGE"),
+        )
 
     def _url_locale(self, request: HttpRequest) -> Optional[str]:
         """The locale the URL carries: the query parameter, or an ``i18n_patterns`` prefix.

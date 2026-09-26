@@ -177,9 +177,9 @@ MUTATIONS: list[tuple[str, list[Edit]]] = [
         [
             (
                 "middleware.py",
-                "        return response\n\n    def _url_locale",
+                "        return response\n\n    def _resolve",
                 "        response.set_cookie(self._cfg.cookie_name, locale)\n"
-                "        return response\n\n    def _url_locale",
+                "        return response\n\n    def _resolve",
             )
         ],
     ),
@@ -215,15 +215,14 @@ MUTATIONS: list[tuple[str, list[Edit]]] = [
         ],
     ),
     (
-        "M20 a label is guessed from the key",
+        "M20 a label placeholder is left as a marker",
         [
             (
                 "messages.py",
-                "        return str(field.label), True\n    return name, False\n",
-                "        return str(field.label), True\n"
-                "    from django.forms.utils import pretty_name\n\n"
-                "    return pretty_name(name), False\n",
-            )
+                "        if name in LABEL_NAMES:\n"
+                "            return match.group(0) % {name: params[name]}\n",
+                "",
+            ),
         ],
     ),
     (
@@ -231,31 +230,31 @@ MUTATIONS: list[tuple[str, list[Edit]]] = [
         [
             (
                 "messages.py",
-                "    return code, with_label(template, label), "
-                "({marker: value} if marker else {})\n",
-                "    return code, str(error.messages[0]), ({marker: value} if marker else {})\n",
-            )
+                "        template, values = "
+                "read if read is not None else (str(error.messages[0]), {})\n",
+                "        template, values = str(error.messages[0]), {}\n",
+            ),
         ],
     ),
     (
-        "M22 a value bound is sized as text",
+        "M22 every failure gets one shared code",
         [
             (
                 "messages.py",
-                "        return size_code(0, too), _VALUE[code], marker, _number(bound)\n",
-                '        return size_code("", too), _VALUE[code], marker, _number(bound)\n',
-            )
+                "            entries.append(build(template, params, field=field, code=code))\n",
+                "            entries.append("
+                'build(template, params, field=field, code="invalid"))\n',
+            ),
         ],
     ),
     (
-        "M23 an unlabelled field is not reported",
+        "M23 an unlabelled field is not advised",
         [
             (
                 "messages.py",
-                "        label, declared = _label(form_class, name, field)\n"
-                "        if not declared:\n",
-                "        label, declared = _label(form_class, name, field)\n        if False:\n",
-            )
+                "        if not declared:\n            yield LabelAdvice(source, name, label)\n",
+                "        if False:\n            yield LabelAdvice(source, name, label)\n",
+            ),
         ],
     ),
     (
@@ -283,36 +282,70 @@ MUTATIONS: list[tuple[str, list[Edit]]] = [
         [
             (
                 "drf.py",
-                "    return code, with_label(template, label), "
-                "({marker: value} if marker else {})\n",
-                "    return code, str(detail), ({marker: value} if marker else {})\n",
-            )
+                "            return _template(str(message), values, written_in)\n",
+                "            return text, {}\n",
+            ),
         ],
     ),
     (
-        "M27 a nested value that is not an object is worded as a format error",
+        "M27 a DRF message is taken as DRF's own without checking its rendering",
         [
             (
                 "drf.py",
-                '        return WORDINGS["object_type"][0], '
-                'with_label(WORDINGS["object_type"][1], label), {}\n',
-                "        return FORMAT[0], with_label(FORMAT[1], label), {}\n",
-            )
+                "            if str(lazy_format(message, **values)) != text:\n"
+                "                continue\n",
+                "            pass\n",
+            ),
         ],
     ),
     (
-        "M28 an unparseable body is left to DRF",
-        [("drf.py", "    if isinstance(exc, ParseError):\n", "    if False:\n")],
-    ),
-    (
-        "M29 a validator's own sentence is replaced by DRF's wording",
+        "M28 the entries replace DRF's body",
         [
             (
                 "drf.py",
-                '    if wording is None or (code == "invalid" and not _own_invalid(field, detail, '
-                "active)):\n",
-                "    if wording is None:\n",
-            )
+                "        dict(response.data), entries,",
+                "        {}, entries,",
+            ),
+        ],
+    ),
+    (
+        "M29 a Django validator on a DRF field is read as text",
+        [
+            (
+                "drf.py",
+                "    for error in _django_failures(node, code, data):\n",
+                "    for error in ():\n",
+            ),
+        ],
+    ),
+    (
+        "M30 the listing fails without --strict",
+        [
+            (
+                "management/commands/langsys_messages.py",
+                '            strict=options["strict"],\n',
+                "            strict=True,\n",
+            ),
+        ],
+    ),
+    (
+        "M31 the listing is not told DRF's label placeholder",
+        [
+            (
+                "management/commands/langsys_messages.py",
+                "            label_placeholders=label_placeholders(),\n",
+                "            label_placeholders=LABEL_PLACEHOLDERS,\n",
+            ),
+        ],
+    ),
+    (
+        "M32 the locale Django resolved is ignored",
+        [
+            (
+                "middleware.py",
+                "        if framework:\n",
+                "        if False:\n",
+            ),
         ],
     ),
 ]

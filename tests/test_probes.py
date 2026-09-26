@@ -21,7 +21,6 @@ from typing import Optional
 
 import langsys
 import pytest
-from langsys.messages import WORDINGS
 
 import langsys_django
 
@@ -192,11 +191,19 @@ PROBES = (
         (("core", "messages.py"),),
     ),
     Probe(
-        "wordings-copy",
+        "shared-codes",
         ("MSG-2",),
-        # The spec's MSG-2 table sentences come from the core's WORDINGS, never a local copy.
-        "|".join(re.escape(template) for _, template in WORDINGS.values()),
-        (("core", "messages.py"),),
+        # A code is the framework's own and a sentence is the framework's own: no vocabulary of
+        # codes to map onto, and no authoring-form wording (`:attribute`) to write labels into.
+        r"\b(size_code|MESSAGE_CODES|WORDINGS|with_label|too_short|too_long|too_small|too_large"
+        r"|too_few|too_many|invalid_format|invalid_type|invalid_option|already_taken)\b"
+        r"|:attribute",
+        (
+            (
+                "synthetic",
+                'return size_code("", "small"), with_label("The :attribute is required.", label)',
+            ),
+        ),
     ),
     Probe(
         "migration-files",

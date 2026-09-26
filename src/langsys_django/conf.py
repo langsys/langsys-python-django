@@ -9,11 +9,13 @@ Example ``settings.py``::
         "BASE_LOCALE": "en-US",  # optional
         "QUERY_PARAM": "locale", # optional: the query parameter that carries a locale
         "COOKIE_NAME": "langsys_locale",           # optional: the cookie the app stores one in
+        "RESPONSE_KEY": "…",   # optional: the key entries sit under in error bodies
     }
 
 Every value is optional here; the underlying SDK also falls back to ``LANGSYS_*`` env vars.
 ``QUERY_PARAM`` and ``COOKIE_NAME`` only say where a request carries its locale; which locale is
-served, and in what order the candidates are tried, is the SDK's.
+served, and in what order the candidates are tried, is the SDK's. ``RESPONSE_KEY`` names the key a
+failed form's or serializer's server-message entries sit under, beside Django's or DRF's own errors.
 """
 
 from __future__ import annotations
@@ -32,6 +34,7 @@ class LangsysSettings:
     base_locale: Optional[str]
     query_param: str
     cookie_name: str
+    response_key: Optional[str]
 
 
 def get_settings() -> LangsysSettings:
@@ -43,4 +46,5 @@ def get_settings() -> LangsysSettings:
         base_locale=raw.get("BASE_LOCALE"),
         query_param=raw.get("QUERY_PARAM", "locale"),
         cookie_name=raw.get("COOKIE_NAME", "langsys_locale"),
+        response_key=raw.get("RESPONSE_KEY"),
     )

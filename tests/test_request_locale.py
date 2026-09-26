@@ -1,9 +1,11 @@
 """SRV-6: which locale a request is served in, and what the response says it varied on.
 
-The middleware hands the core its candidates (the URL, the app's locale cookie, the
+Where Django's ``LocaleMiddleware`` resolved the request's language, that is the locale served,
+mapped to the project's form by the core, and the SDK adds nothing to ``Vary``. Where nothing
+resolved it, the middleware hands the core its candidates (the URL, the app's locale cookie, the
 ``Accept-Language`` header) and serves what ``resolve_request_locale`` chooses, validated against
-the project's own locales from authorization. The binding's part is where each candidate comes
-from and putting the answer's ``Vary`` headers on the response; it never writes a cookie.
+the project's own locales from authorization, with the ``Vary`` headers that choice depended on.
+The binding never writes a cookie.
 """
 
 from __future__ import annotations
@@ -47,7 +49,7 @@ def langsys(settings, httpx_mock):
                 "title": "T",
                 "base_locale": "en-us",
                 "target_locales": ["es-es", "it-it", "de-de"],
-                "default_locales": {},
+                "default_locales": {"es": "es-es", "it": "it-it", "de": "de-de"},
                 "key_type": "write",
                 "write_enabled": True,
                 "langsys_settings": {"translatable_items": {"batch_limit": 200}},
@@ -158,3 +160,56 @@ def test_control_a_path_that_starts_like_a_locale_is_not_one_without_i18n_patter
     visit("/it/where/", accept_language="de-DE")
 
     assert served() == "de-de"
+
+
+# -- the locale Django resolved ---------------------------------------------------------------
+
+
+@pytest.fixture()
+def django_locale(langsys, settings):
+    settings.MIDDLEWARE = [
+        "django.middleware.locale.LocaleMiddleware",
+        "langsys_django.middleware.LangsysMiddleware",
+    ]
+    settings.LANGUAGES = [
+        ("en", "English"),
+        ("es", "Spanish"),
+        ("es-es", "Spain"),
+        ("fr", "French"),
+    ]
+
+
+def framework_visit(language: str, **candidates: Any) -> Any:
+    visitor = Client()
+    visitor.cookies["django_language"] = language
+    return visit_with(visitor, **candidates)
+
+
+def visit_with(
+    visitor: Client, *, url: str = "/where/", cookie: str = "", accept_language: str = ""
+):
+    if cookie:
+        visitor.cookies["langsys_locale"] = cookie
+    extra = {"HTTP_ACCEPT_LANGUAGE": accept_language} if accept_language else {}
+    return visitor.get(url, **extra)
+
+
+def test_SRV6_the_locale_django_resolved_wins_and_the_sdk_adds_no_vary(django_locale):
+    response = framework_visit(
+        "es-es", url="/where/?locale=it-IT", cookie="de-DE", accept_language="de-DE"
+    )
+
+    assert served() == "es-es"
+    assert vary(response) == {"Accept-Language"}, "only what LocaleMiddleware itself varies on"
+
+
+def test_SRV6_a_bare_language_from_django_is_the_projects_default_locale_for_it(django_locale):
+    framework_visit("es", cookie="it-IT")
+
+    assert served() == "es-es"
+
+
+def test_SRV6_a_django_locale_the_project_does_not_serve_is_served_as_the_base(django_locale):
+    framework_visit("fr", url="/where/?locale=it-IT")
+
+    assert served() == "en-us"

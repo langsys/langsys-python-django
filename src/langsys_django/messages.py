@@ -1,162 +1,195 @@
-"""Server messages for Django (spec MSG family): a failed form's validators as entries.
+"""Server messages for Django (spec MSG family): a failed form's errors as translatable entries.
 
 The core's ``langsys.messages`` owns the entry shape, the fill, the template checks and the listing
-command. This module supplies what only Django knows:
+command. This module supplies what only Django knows, and changes nothing Django does:
 
-* which validators failed, and with what parameters (MSG-9): each ``ValidationError``'s ``code`` and
-  ``params``, never Django's rendered message;
-* the label a field declares: a form field's ``label``, a ``ModelForm``'s ``Meta.labels``, or a
-  model field's ``verbose_name`` (MSG-10);
-* the default langsys envelope for a failed form, and the template tags that render entries (MSG-5);
-* a provider that lists every template a set of forms can emit, for the ``langsys_messages``
-  management command (MSG-7).
+* each entry is built from the ``ValidationError`` Django raised: its ``message`` before Django
+  fills it, its ``params`` and its ``code``, never from the rendered text (MSG-9). The code is
+  Django's own, passed through; a failure raised without one carries none (MSG-2);
+* the template is Django's own sentence, in the source language, as Django wrote it: ``This field is
+  required.`` stays exactly that (MSG-3). Where the sentence names the field or the model —
+  ``%(field_label)s``, ``%(field_labels)s``, ``%(model_name)s``, ``%(date_field_label)s`` — the
+  label Django prints there is written in; every other ``%(name)s`` becomes a ``{name}`` marker,
+  filled from Django's own params;
+* :func:`error_response` answers with Django's own error body, ``form.errors.get_json_data()``, with
+  the entries attached under a configurable key (MSG-1);
+* a provider lists every template a set of forms can emit, for the ``langsys_messages`` management
+  command (MSG-7).
 
-The wording is the reference's: the label is written into the sentence, and only a value that is
-not translatable, a number or a date, stays a ``{name}`` marker (MSG-3). A size rule takes its code
-from the field's type through the core's ``size_code``.
+A custom validator follows Django's convention and is translatable as it stands: raise
+``ValidationError("That name is reserved.", code="reserved")``, or with ``%(name)s`` placeholders
+and ``params``. Name the messages a validator function can raise with :func:`declares` so the
+listing has them ahead of time; a class-based validator's ``message`` attribute is listed as it is.
 
 Usage::
 
     form = SignupForm(request.POST)
     if not form.is_valid():
-        return error_response(form)   # 422 with the langsys envelope
+        return error_response(form)   # Django's errors, plus the entries under "langsys_errors"
 """
 
 from __future__ import annotations
 
 import contextlib
+import inspect
+import re
 from collections.abc import Iterable, Iterator, Mapping
-from datetime import date, time
+from dataclasses import dataclass
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Callable, Optional, TypeVar, Union
 
 from django import forms
 from django.core import validators
 from django.core.exceptions import NON_FIELD_ERRORS, FieldDoesNotExist, ValidationError
+from django.forms.utils import pretty_name
 from django.http import JsonResponse
 from django.utils import translation
-from langsys.messages import TemplateProblem, server_message, size_code, with_label
+from langsys.messages import TemplateProblem, attach_server_messages, server_message
 
 from .client import get_client
+from .conf import get_settings
 
 if TYPE_CHECKING:
     from langsys import LangsysClient
 
 __all__ = [
+    "LABEL_PLACEHOLDERS",
+    "LabelAdvice",
     "declared_templates",
     "declares",
     "entries_from_form",
     "error_response",
-    "message_error",
 ]
 
 Entry = dict[str, Any]
-Declared = Union[str, Mapping[str, Any], TemplateProblem]
 F = TypeVar("F", bound=Callable[..., Any])
 
-#: The envelope's own entry.
-FAILED = ("validation_failed", "The request failed validation.")
 
-#: Reference wording. `:attribute` is where the label is written in.
-GENERIC = ("invalid", "The :attribute is invalid.")
-FORMAT = ("invalid_format", "The :attribute format is invalid.")
-REQUIRED = ("required", "The :attribute is required.")
-TAKEN = ("already_taken", "The :attribute has already been taken.")
-TAKEN_TOGETHER = ("already_taken", "This combination of :attribute has already been taken.")
-CHOICE = ("invalid_option", "The selected :attribute is invalid.")
-NOT_FOUND = ("not_found", "The selected :attribute is invalid.")
-LIST = ("invalid_type", "The :attribute must be a list.")
+@dataclass(frozen=True)
+class LabelAdvice:
+    """A validated field with no declared label (MSG-10). Django names it from its key, which is
+    sometimes a raw key the app would rather not show. The listing command prints this as advice;
+    it never fails the command."""
 
-EMAIL = ("invalid_format", "The :attribute must be a valid email address.")
-URL = ("invalid_format", "The :attribute must be a valid URL.")
-UUID_ = ("invalid_format", "The :attribute must be a valid UUID.")
-WHOLE = ("invalid_type", "The :attribute must be a whole number.")
-NUMBER = ("invalid_type", "The :attribute must be a number.")
-DATE = ("invalid_format", "The :attribute must be a valid date.")
-JSON_VALUE = ("invalid_format", "The :attribute must be valid JSON.")
-IMAGE = ("invalid_format", "The :attribute must be an image.")
-FILE = ("invalid_type", "The :attribute must be a file.")
+    source: str
+    field: str
+    label: str
 
-#: A field's own `invalid`, by field type. Order matters: Django's FloatField and DecimalField are
-#: IntegerFields, and an ImageField is a FileField.
-_INVALID: tuple[tuple[type, tuple[str, str]], ...] = (
-    (forms.EmailField, EMAIL),
-    (forms.URLField, URL),
-    (forms.UUIDField, UUID_),
-    (forms.FloatField, NUMBER),
-    (forms.DecimalField, NUMBER),
-    (forms.IntegerField, WHOLE),
-    (forms.DateTimeField, DATE),
-    (forms.DateField, DATE),
-    (forms.TimeField, DATE),
-    (forms.JSONField, JSON_VALUE),
-    (forms.ImageField, IMAGE),
-    (forms.FileField, FILE),
+    def __str__(self) -> str:
+        return (
+            f"{self.source} field {self.field!r} has no declared label, so Django names it "
+            f"{self.label!r} - declare one to choose the name users see"
+        )
+
+
+Declared = Union[str, Mapping[str, Any], TemplateProblem, LabelAdvice]
+
+#: Django's placeholders that stand for a label or a model's name. What they hold is translatable,
+#: so the name Django prints is written into the sentence rather than left as a marker (MSG-3). A
+#: template that still holds one is refused when it is added (MSG-11).
+LABEL_NAMES = frozenset({"field_label", "field_labels", "model_name", "date_field_label"})
+LABEL_PLACEHOLDERS = tuple(f"%({name})s" for name in sorted(LABEL_NAMES))
+
+#: A %-format placeholder as Django's messages write them: `%(limit_value)d`, `%(value)r`, `%%`.
+_PERCENT = re.compile(
+    r"%(?:\((?P<name>[^)]*)\))?(?P<spec>[#0\- +]*\d*(?:\.\d+)?)(?P<kind>[diouxXeEfFgGcrsa%])"
 )
-_TEMPORAL = (forms.DateField, forms.DateTimeField, forms.TimeField)
-
-#: Length rules: text wording, then the wording for a field holding a list.
-_LENGTH = {
-    "min_length": (
-        "The :attribute must be at least {min} characters.",
-        "The :attribute must have at least {min} items.",
-    ),
-    "max_length": (
-        "The :attribute must not be longer than {max} characters.",
-        "The :attribute must not have more than {max} items.",
-    ),
-}
-_VALUE = {
-    "min_value": "The :attribute must be at least {min}.",
-    "max_value": "The :attribute must not be greater than {max}.",
-}
-#: A bound that is a date is a date comparison, worded as the reference's after/before rules.
-_DATED = {
-    "min_value": "The :attribute must be on or after {date}.",
-    "max_value": "The :attribute must be on or before {date}.",
-}
-_DIGITS = {
-    "max_digits": "The :attribute must not have more than {max} digits.",
-    "max_decimal_places": "The :attribute must not have more than {max} decimal places.",
-    "max_whole_digits": (
-        "The :attribute must not have more than {max} digits before the decimal point."
-    ),
-}
-_STEP = "The :attribute must be a multiple of {step}."
-_REQUIRED_CODES = ("required", "blank", "null", "missing", "empty")
-_FORMAT_CODES = ("null_characters_not_allowed", "invalid_extension", "overflow")
-
-#: The params key `message_error()` carries its declared template under.
-_TEMPLATE_KEY = "langsys_template"
-
-Wording = tuple[str, str, Optional[str], Any]
 
 
-def message_error(code: str, template: str, **params: Any) -> ValidationError:
-    """A validator failure with a declared template (MSG-9). Raise it from a validator or a form's
-    ``clean`` method::
-
-        raise message_error("already_taken", "The email address has already been taken.")
-
-    ``template`` is a whole sentence with the label written in; ``params`` fill its ``{name}``
-    markers and hold only values that are not translatable. Name the template with
-    :func:`declares` so the listing registers it ahead of time.
-    """
-    return ValidationError(template, code=code, params={**params, _TEMPLATE_KEY: template})
-
-
-def declares(*templates: str) -> Callable[[F], F]:
-    """Name the templates a custom validator or ``clean`` method can fail with, so
-    :func:`declared_templates` lists them rather than reporting it as unlistable."""
+def declares(*messages: str) -> Callable[[F], F]:
+    """Name the messages a custom validator function or ``clean`` method can raise, written as
+    Django writes them (``%(name)s`` placeholders), so :func:`declared_templates` lists them rather
+    than reporting the validator."""
 
     def mark(func: F) -> F:
-        func.__langsys_templates__ = templates  # type: ignore[attr-defined]
+        func.__langsys_templates__ = messages  # type: ignore[attr-defined]
         return func
 
     return mark
 
 
-# -- errors -> entries (MSG-9, MSG-10) --------------------------------------------------------
+# -- Django's message -> template and params (MSG-3, MSG-4, MSG-9) -----------------------------
+
+
+def unfilled(
+    message: Any, number: Any = None, *, params: Optional[Mapping[str, Any]] = None
+) -> Optional[str]:
+    """Django's sentence for a failure before its values are filled, in the active language, or
+    None when it cannot be read.
+
+    A message made with ``ngettext_lazy(singular, plural, "name")`` picks its form from a param
+    when Django fills it; the form is chosen here the same way, from ``params`` or ``number``.
+    """
+    resolved = message
+    cast = getattr(message, "_proxy____cast", None)
+    if cast is not None:
+        resolved = cast()
+    choose = getattr(resolved, "_translate", None)
+    if choose is None:
+        return str(resolved)
+    if params is not None:
+        with contextlib.suppress(KeyError):
+            number = resolved._get_number_value(params)
+    return None if number is None else str(choose(number))
+
+
+def to_template(
+    text: str, params: Optional[Mapping[str, Any]] = None
+) -> Optional[tuple[str, dict[str, Any]]]:
+    """A Django sentence as a template, and the params that fill it.
+
+    ``%(name)s`` becomes the marker ``{name}`` and its value a param, as Django prints it: ``%r``
+    as the value's ``repr``, a number as a number. A label placeholder is written in as Django
+    prints it. Without ``params`` (listing ahead of time) only the markers are made, and a label
+    placeholder stays in place, for the template check to refuse (MSG-11). ``%%`` is a percent
+    sign. None when a placeholder has no name, or no value in ``params``.
+    """
+    values: dict[str, Any] = {}
+    names = [m["name"] for m in _PERCENT.finditer(text) if m["kind"] != "%"]
+    if None in names or (params is not None and not set(names) <= set(params)):
+        return None
+
+    def convert(match: re.Match[str]) -> str:
+        kind, name = match["kind"], match["name"]
+        if kind == "%":
+            return "%"
+        if params is None:
+            return match.group(0) if name in LABEL_NAMES else "{" + name + "}"
+        if name in LABEL_NAMES:
+            return match.group(0) % {name: params[name]}
+        values[name] = _param(params[name], kind)
+        return "{" + name + "}"
+
+    return _PERCENT.sub(convert, text), values
+
+
+def _param(value: Any, kind: str) -> Any:
+    """A value as Django prints it into the sentence; numbers stay numbers (MSG-4)."""
+    if kind == "r":
+        return repr(value)
+    if kind in "diouxX" and not isinstance(value, bool):
+        with contextlib.suppress(TypeError, ValueError):
+            return int(value)
+    if isinstance(value, Decimal):
+        return int(value) if value == value.to_integral_value() else float(value)
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return value
+    return str(value)
+
+
+def entry_parts(error: ValidationError) -> tuple[Optional[str], str, Optional[dict[str, Any]]]:
+    """``(code, template, params)`` for one of Django's ``ValidationError``s, in the source
+    language. A message that cannot be read unfilled is the finished text it is, with no params,
+    and the listing reports the validator that raised it (MSG-9)."""
+    params = dict(error.params or {})
+    with translation.override(None):
+        text = unfilled(error.message, params=params)
+        read = to_template(text, params) if text is not None else None
+        template, values = read if read is not None else (str(error.messages[0]), {})
+    return error.code, template, values or None
+
+
+# -- errors -> entries (MSG-1, MSG-9) ---------------------------------------------------------
 
 
 def entries_from_form(
@@ -164,113 +197,38 @@ def entries_from_form(
 ) -> list[Entry]:
     """Entries for a bound form's errors, in the order Django reports them. With ``client``, each
     entry goes through ``client.server_message`` (MSG-8 registration, MSG-11 check); without, the
-    core's pure constructor."""
+    core's pure constructor. A form-wide failure carries no ``field``."""
     build = client.server_message if client is not None else server_message
-    form_class = type(form)
     entries: list[Entry] = []
-    # Labels and templates are source text, so they are read with Django's own translation off.
-    with translation.override(None):
-        for name, errors in form.errors.as_data().items():
-            field = form.fields.get(name) if name != NON_FIELD_ERRORS else None
-            for error in errors:
-                if field is None:
-                    code, template, params = _form_rule(form_class, error)
-                    entries.append(build(code, template, params or None, None))
-                    continue
-                label, _ = _label(form_class, name, field)
-                code, template, params = _rule(field, error, label)
-                entries.append(build(code, template, params or None, name))
+    for name, errors in form.errors.as_data().items():
+        field = None if name == NON_FIELD_ERRORS else name
+        for error in errors:
+            code, template, params = entry_parts(error)
+            entries.append(build(template, params, field=field, code=code))
     return entries
 
 
-def error_response(form: forms.BaseForm, *, status: int = 422) -> JsonResponse:
-    """Answer a failed form with the default langsys envelope:
-    ``{"status": false, "error": {code, message, template, "errors": [entry, …]}}``."""
-    client = get_client()
-    entries = entries_from_form(form, client=client)
-    failed = client.server_message(*FAILED)
-    return JsonResponse({"status": False, "error": {**failed, "errors": entries}}, status=status)
-
-
-def _rule(
-    field: forms.Field, error: ValidationError, label: str
-) -> tuple[str, str, dict[str, Any]]:
-    params = dict(error.params or {})
-    declared = params.pop(_TEMPLATE_KEY, None)
-    if declared is not None:  # message_error(): the app declared the sentence
-        return error.code or GENERIC[0], str(declared), params
-    wording = _wording(field, error.code, params.get("limit_value", params.get("max")))
-    if wording is None:
-        # Text only: whoever raised it wrote this sentence, so it is the template.
-        return GENERIC[0], str(error.messages[0]), {}
-    code, template, marker, value = wording
-    return code, with_label(template, label), ({marker: value} if marker else {})
-
-
-def _form_rule(form_class: type, error: ValidationError) -> tuple[str, str, dict[str, Any]]:
-    """A failure that belongs to the form as a whole: it carries no ``field``."""
-    params = dict(error.params or {})
-    declared = params.pop(_TEMPLATE_KEY, None)
-    if declared is not None:
-        return error.code or GENERIC[0], str(declared), params
-    if error.code == "unique_together":
-        names = params.get("unique_check") or ()
-        labels = " and ".join(_label(form_class, name, None)[0] for name in names)
-        return TAKEN_TOGETHER[0], with_label(TAKEN_TOGETHER[1], labels), {}
-    return GENERIC[0], str(error.messages[0]), {}
-
-
-def _wording(
-    field: Optional[forms.Field], code: Optional[str], bound: Any = None
-) -> Optional[Wording]:
-    """``(code, authoring template, marker, marker value)`` for a Django failure, or None when the
-    failure is not one of Django's own rules."""
-    if code in _REQUIRED_CODES:
-        return (*REQUIRED, None, None)
-    if code == "unique":
-        return (*TAKEN, None, None)
-    if code == "invalid_choice":
-        return (*(NOT_FOUND if isinstance(field, forms.ModelChoiceField) else CHOICE), None, None)
-    if code == "invalid_pk_value":
-        return (*NOT_FOUND, None, None)
-    if code == "invalid_list":
-        return (*LIST, None, None)
-    if code in ("invalid", "invalid_image"):
-        for kind, wording in _INVALID:
-            if isinstance(field, kind):
-                return (*wording, None, None)
-        return (*FORMAT, None, None)
-    if code in _FORMAT_CODES:
-        return (*FORMAT, None, None)
-    if code in _LENGTH:
-        many = isinstance(field, forms.MultipleChoiceField)
-        too, marker = ("small", "min") if code == "min_length" else ("large", "max")
-        return size_code([] if many else "", too), _LENGTH[code][1 if many else 0], marker, bound
-    if code in _VALUE:
-        too, marker = ("small", "min") if code == "min_value" else ("large", "max")
-        if isinstance(field, _TEMPORAL) or isinstance(bound, (date, time)):
-            shown = bound.isoformat() if isinstance(bound, (date, time)) else bound
-            return "invalid_date", _DATED[code], "date", shown
-        return size_code(0, too), _VALUE[code], marker, _number(bound)
-    if code in _DIGITS:
-        return "too_large", _DIGITS[code], "max", bound
-    if code == "step_size":
-        return GENERIC[0], _STEP, "step", _number(bound)
-    return None
-
-
-def _number(value: Any) -> Any:
-    if isinstance(value, Decimal):
-        return int(value) if value == value.to_integral_value() else float(value)
-    return value
+def error_response(
+    form: forms.BaseForm, *, status: int = 400, key: Optional[str] = None
+) -> JsonResponse:
+    """Answer a failed form with Django's own error body, ``form.errors.get_json_data()``, and the
+    form's entries attached beside it under ``key``: the ``RESPONSE_KEY`` setting, or the core's
+    default key."""
+    entries = entries_from_form(form, client=get_client())
+    key = key or get_settings().response_key
+    body = attach_server_messages(
+        form.errors.get_json_data(), entries, **({"key": key} if key else {})
+    )
+    return JsonResponse(body, status=status)
 
 
 # -- labels (MSG-10) --------------------------------------------------------------------------
 
 
 def _label(form_class: type, name: str, field: Optional[forms.Field]) -> tuple[str, bool]:
-    """The label declared for ``name``, and whether one was declared. A field with none is named by
-    its key, never by a name guessed from it, and the listing reports it."""
+    """The label Django shows for ``name``, and whether the app declared it: a form field's
+    ``label``, ``Meta.labels``, or the model field's ``verbose_name``. Otherwise Django derives
+    one from the key."""
     declared = getattr(form_class, "declared_fields", {}).get(name)
     if declared is not None and declared.label is not None:
         return str(declared.label), True
@@ -281,51 +239,30 @@ def _label(form_class: type, name: str, field: Optional[forms.Field]) -> tuple[s
     model = getattr(meta, "model", None)
     if model is not None:
         with contextlib.suppress(FieldDoesNotExist):
-            verbose = getattr(model._meta.get_field(name), "_verbose_name", None)
-            return (str(verbose), True) if verbose else (name, False)
+            model_field = model._meta.get_field(name)
+            declared_name = getattr(model_field, "_verbose_name", None)
+            return str(model_field.verbose_name), declared_name is not None
     if field is not None and field.label is not None:
         return str(field.label), True
-    return name, False
+    return pretty_name(name), False
 
 
 # -- listing (MSG-7) --------------------------------------------------------------------------
 
-#: Django's own validators, and the failure codes each can raise.
-_VALIDATOR_CODES: tuple[tuple[Any, tuple[str, ...]], ...] = (
-    (validators.MinLengthValidator, ("min_length",)),
-    (validators.MaxLengthValidator, ("max_length",)),
-    (validators.MinValueValidator, ("min_value",)),
-    (validators.MaxValueValidator, ("max_value",)),
-    (validators.ProhibitNullCharactersValidator, ("null_characters_not_allowed",)),
-    (validators.FileExtensionValidator, ("invalid_extension",)),
-    (validators.EmailValidator, ("invalid",)),
-    (validators.RegexValidator, ("invalid",)),
-)
-if hasattr(validators, "StepValueValidator"):
-    _VALIDATOR_CODES += ((validators.StepValueValidator, ("step_size",)),)
-#: Django's validators that are plain functions; its slug and email validators are instances of
-#: the classes above.
-_FUNCTION_VALIDATORS = (
-    validators.validate_ipv4_address,
-    validators.validate_ipv6_address,
-    validators.validate_ipv46_address,
-    validators.validate_integer,
-)
-
 
 def declared_templates(form_classes: Iterable[type]) -> Iterator[Declared]:
-    """Every template ``form_classes`` can emit, for the core's listing command (MSG-7).
+    """Every template ``form_classes`` can emit, for the ``langsys_messages`` command (MSG-7).
 
-    A field with no declared label, and a custom validator or ``clean`` method whose templates are
-    not named with :func:`declares`, are reported as problems, so the command fails in CI rather
-    than a raw key or an unlisted sentence reaching a user. Point the command at a provider::
+    A custom validator or ``clean`` method whose messages are not named with :func:`declares` is
+    reported: its messages register the first time they are emitted (MSG-8), and ``--strict``
+    makes the report fail the command. A field with no declared label is advice. Point the command
+    at a provider::
 
         def templates():
             return declared_templates([SignupForm, ProfileForm])
 
         # python manage.py langsys_messages --provider myapp.langsys:templates [--register]
     """
-    yield {"template": FAILED[1], "source": "langsys_django"}
     with translation.override(None):
         for form_class in form_classes:
             yield from _form_templates(form_class)
@@ -337,87 +274,107 @@ def _form_templates(form_class: Any) -> Iterator[Declared]:
     for name, field in form_class.base_fields.items():
         label, declared = _label(form_class, name, field)
         if not declared:
-            yield TemplateProblem(
-                "the field has no label, so its key would be written into the sentence",
-                source=source,
-                field=name,
-                fix="give the model field a verbose_name, or the form field a label (MSG-10)",
-            )
-            continue
-        for template in dict.fromkeys(_field_templates(field, model, name)):
-            yield {"template": with_label(template, label), "source": source, "field": name}
-        for validator in field.validators:
-            if _is_django_validator(validator):
+            yield LabelAdvice(source, name, label)
+        for code, message in field.error_messages.items():
+            if code == "required" and not field.required:
                 continue
-            yield from _custom(
-                validator, source, name, getattr(validator, "__name__", type(validator).__name__)
-            )
+            count = getattr(field, "max_length", None) if code == "max_length" else None
+            yield from listed(message, source, name, number=count)
+        for validator in field.validators:
+            yield from validator_templates(validator, source, name)
+        if model is not None:
+            yield from _unique_templates(model, (name,), source, name)
     for attr in sorted(vars(form_class)):
         if attr == "clean" or attr.startswith("clean_"):
-            yield from _custom(
+            yield from custom_templates(
                 vars(form_class)[attr], source, attr[6:] if attr != "clean" else "", attr
             )
     if model is not None:
         for together in model._meta.unique_together:
-            labels = " and ".join(_label(form_class, name, None)[0] for name in together)
-            yield {"template": with_label(TAKEN_TOGETHER[1], labels), "source": source}
+            if all(name in form_class.base_fields for name in together):
+                yield from _unique_templates(model, tuple(together), source, "")
 
 
-def _field_templates(field: forms.Field, model: Any, name: str) -> Iterator[str]:
-    if field.required:
-        yield REQUIRED[1]
-    if isinstance(field, forms.MultipleChoiceField):
-        yield LIST[1]
-    if isinstance(field, (forms.ChoiceField, forms.ModelChoiceField)):
-        yield (NOT_FOUND if isinstance(field, forms.ModelChoiceField) else CHOICE)[1]
-    if isinstance(field, tuple(kind for kind, _ in _INVALID)):
-        wording = _wording(field, "invalid")
-        if wording is not None:
-            yield wording[1]
-    for validator in field.validators:
-        for code in _codes_of(validator):
-            wording = _wording(field, code, getattr(validator, "limit_value", None))
-            if wording is not None:
-                yield wording[1]
-    if model is not None:
-        with contextlib.suppress(FieldDoesNotExist):
-            if model._meta.get_field(name).unique:
-                yield TAKEN[1]
+def _unique_templates(
+    model: Any, check: tuple[str, ...], source: str, field: str
+) -> Iterator[Declared]:
+    """Django's own uniqueness message for ``check``, as ``Model.unique_error_message`` builds it,
+    with the model's and the fields' names written in."""
+    if len(check) == 1:
+        try:
+            if not model._meta.get_field(check[0]).unique:
+                return
+        except FieldDoesNotExist:
+            return
+    _, template, _ = entry_parts(model().unique_error_message(model, check))
+    yield _item(template, source, field)
 
 
-def _codes_of(validator: Any) -> tuple[str, ...]:
+def validator_templates(validator: Any, source: str, field: str) -> Iterator[Declared]:
+    """The messages a validator can raise. By Django's convention a class-based validator keeps
+    its message in a ``message`` attribute, and ``DecimalValidator`` in a ``messages`` dict; a
+    function names its messages with :func:`declares` and is otherwise reported."""
     if isinstance(validator, validators.DecimalValidator):
-        return tuple(
-            code
-            for code, limit in (
-                ("max_digits", validator.max_digits),
-                ("max_decimal_places", validator.decimal_places),
-                ("max_whole_digits", validator.max_digits and validator.decimal_places),
-            )
-            if limit is not None
-        )
-    if any(validator is function for function in _FUNCTION_VALIDATORS):
-        return ("invalid",)
-    for kind, codes in _VALIDATOR_CODES:
-        if isinstance(validator, kind):
-            return codes
-    return ()
+        digits, places = validator.max_digits, validator.decimal_places
+        counts = {
+            "max_digits": digits,
+            "max_decimal_places": places,
+            "max_whole_digits": digits - places
+            if digits is not None and places is not None
+            else None,
+        }
+        for code, count in counts.items():
+            if count is not None:
+                yield from listed(validator.messages[code], source, field, number=count)
+        return
+    message = getattr(validator, "message", None)
+    if message is not None and not inspect.isroutine(validator):
+        limit = getattr(validator, "limit_value", None)
+        yield from listed(message, source, field, number=None if callable(limit) else limit)
+        return
+    name = getattr(validator, "__name__", type(validator).__name__)
+    yield from custom_templates(validator, source, field, name)
 
 
-def _is_django_validator(validator: Any) -> bool:
-    return bool(_codes_of(validator)) or isinstance(validator, validators.DecimalValidator)
-
-
-def _custom(func: Any, source: str, field: str, name: str) -> Iterator[Declared]:
+def custom_templates(func: Any, source: str, field: str, name: str) -> Iterator[Declared]:
+    """What a validator function or ``clean`` method declares, or a report that it cannot be
+    listed ahead of time."""
     declared = getattr(func, "__langsys_templates__", None)
     if declared is not None:
-        for template in declared:
-            yield {"template": template, "source": source, "field": field}
+        for message in declared:
+            yield from listed(message, source, field)
         return
     yield TemplateProblem(
-        f"{name!r} can fail with text that cannot be listed ahead of time",
+        f"{name!r} can fail with a message that cannot be listed ahead of time; it registers the "
+        "first time it is emitted",
         source=source,
         field=field,
-        fix="fail with langsys_django.messages.message_error(code, template) and name its "
-        "templates with @declares(...)",
+        fix="name the messages it raises with @langsys_django.messages.declares(...)",
     )
+
+
+def listed(message: Any, source: str, field: str, *, number: Any = None) -> Iterator[Declared]:
+    """A Django message as the template it lists as. A plural message whose count is not known
+    ahead of time lists both of its source forms."""
+    chosen = unfilled(message, number)
+    forms_: list[Optional[str]] = (
+        [chosen] if chosen is not None else [unfilled(message, 1), unfilled(message, 2)]
+    )
+    for text in dict.fromkeys(str(form) for form in forms_):
+        read = to_template(text)
+        if read is None:
+            yield TemplateProblem(
+                f"{text!r} has a placeholder with no name, so it cannot be made a template",
+                source=source,
+                field=field,
+                fix="name each placeholder, as %(name)s",
+            )
+            continue
+        yield _item(read[0], source, field)
+
+
+def _item(template: str, source: str, field: str) -> Mapping[str, Any]:
+    item = {"template": template, "source": source}
+    if field:
+        item["field"] = field
+    return item

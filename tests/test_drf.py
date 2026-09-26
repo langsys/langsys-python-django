@@ -1,8 +1,8 @@
 """Server messages from Django REST framework serializers (spec MSG family).
 
-Entries are built from the rule that failed and the failing field's own bounds, never from DRF's
-rendered text (MSG-9); labels are the ones fields declare (MSG-10); a body or nested value that is
-not an object, and a body that is not JSON, take the core's MSG-2 wording table; every template a
+Each entry carries DRF's own code and DRF's own sentence as its template, its values read from the
+field and the input where DRF reads them, never parsed from DRF's rendered text (MSG-2, MSG-3,
+MSG-9). DRF's error response is left as it is, with the entries beside it (MSG-1). Every template a
 serializer can emit is listable ahead of time (MSG-7).
 """
 
@@ -13,10 +13,12 @@ import re
 
 import httpx
 import pytest
+from django.core.management import call_command
+from django.core.validators import MinValueValidator
 from django.urls import path
 from langsys import LangsysClient
 from langsys.cache import MemoryCache
-from langsys.messages import WORDINGS, TemplateProblem
+from langsys.messages import TemplateProblem
 from rest_framework import generics, serializers
 from rest_framework.renderers import JSONRenderer
 from rest_framework.response import Response
@@ -25,7 +27,8 @@ from rest_framework.test import APIClient
 from langsys_django.client import reset_client, set_client
 from langsys_django.drf import declared_templates, entries_from_serializer
 from langsys_django.locale import ContextVarLocaleSource
-from tests.test_messages import Account
+from langsys_django.messages import LabelAdvice, declares
+from tests.test_messages import Account, Membership
 
 pytestmark = [
     pytest.mark.urls("tests.test_drf"),
@@ -33,11 +36,24 @@ pytestmark = [
 ]
 
 TRANS = re.compile(r"https://api\.test/api/translations")
+NOT_AN_OBJECT = "Invalid data. Expected a dictionary, but got {datatype}."
 
 
 def no_reserved_names(value: str) -> None:
     if "admin" in value:
         raise serializers.ValidationError("That name is reserved.")
+
+
+@declares("The fields {field_names} clash.")
+def no_clashing_fields(value: str) -> None:
+    no_reserved_names(value)
+
+
+def clashing_templates():
+    class Clashing(serializers.Serializer):
+        name = serializers.CharField(label="name", validators=[no_clashing_fields])
+
+    return declared_templates([Clashing])
 
 
 class SignupSerializer(serializers.Serializer):
@@ -64,6 +80,12 @@ class AccountSerializer(serializers.ModelSerializer):
         fields = ["email", "cc_number"]
 
 
+class MembershipSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Membership
+        fields = ["handle", "team", "role"]
+
+
 class SignupView(generics.GenericAPIView):
     serializer_class = SignupSerializer
     authentication_classes: list = []
@@ -80,7 +102,7 @@ urlpatterns = [path("signup/", SignupView.as_view())]
 
 
 def entry_view(entries):
-    return [(e["code"], e["template"], e.get("params"), e.get("field")) for e in entries]
+    return [(e.get("code"), e["template"], e.get("params"), e.get("field")) for e in entries]
 
 
 def errors_of(serializer_class, data):
@@ -89,20 +111,25 @@ def errors_of(serializer_class, data):
     return entries_from_serializer(serializer)
 
 
-# -- MSG-9: the rule that failed, never DRF's text ------------------------------------------------
+# -- MSG-9 / MSG-2 / MSG-3: DRF's code and sentence, values from the field ----------------------
 
 
 def test_MSG9_two_failed_rules_on_one_field_become_two_entries():
     entries = errors_of(SignupSerializer, {"email": "a@b"})
 
     assert entry_view(entries) == [
-        ("too_short", "The email address must be at least {min} characters.", {"min": 8}, "email"),
-        ("invalid_format", "The email address must be a valid email address.", None, "email"),
+        (
+            "min_length",
+            "Ensure this field has at least {min_length} characters.",
+            {"min_length": 8},
+            "email",
+        ),
+        ("invalid", "Enter a valid email address.", None, "email"),
     ]
-    assert entries[0]["message"] == "The email address must be at least 8 characters."
+    assert entries[0]["message"] == "Ensure this field has at least 8 characters."
 
 
-def test_MSG9_a_validators_own_sentence_is_kept_as_written():
+def test_MSG9_a_validators_own_sentence_is_kept_as_written_with_drfs_code():
     class Named(serializers.Serializer):
         name = serializers.CharField(label="name", validators=[no_reserved_names])
 
@@ -111,7 +138,21 @@ def test_MSG9_a_validators_own_sentence_is_kept_as_written():
     ]
 
 
-def test_MSG9_a_declared_code_keeps_its_template():
+def test_MSG9_a_django_validator_on_a_drf_field_keeps_djangos_sentence():
+    class Seats(serializers.Serializer):
+        seats = serializers.IntegerField(label="seats", validators=[MinValueValidator(3)])
+
+    assert entry_view(errors_of(Seats, {"seats": 1})) == [
+        (
+            "min_value",
+            "Ensure this value is greater than or equal to {limit_value}.",
+            {"limit_value": 3},
+            "seats",
+        )
+    ]
+
+
+def test_MSG2_an_apps_code_passes_through():
     class Taken(serializers.Serializer):
         email = serializers.EmailField(label="email address")
 
@@ -132,33 +173,23 @@ def test_MSG1_fields_are_dotted_paths_through_nested_serializers_and_lists():
         "tags": ["a", "waytoolong"],
     }
 
+    too_long = "Ensure this field has no more than {max_length} characters."
     assert entry_view(errors_of(Order, data)) == [
-        ("required", "The city is required.", None, "address.city"),
-        (
-            "too_long",
-            "The item name must not be longer than {max} characters.",
-            {"max": 3},
-            "items.1.name",
-        ),
-        ("too_long", "The tags must not be longer than {max} characters.", {"max": 5}, "tags.1"),
+        ("required", "This field is required.", None, "address.city"),
+        ("max_length", too_long, {"max_length": 3}, "items.1.name"),
+        ("max_length", too_long, {"max_length": 5}, "tags.1"),
     ]
 
 
-def test_MSG2_a_nested_value_and_a_body_that_are_not_objects_take_the_wording_table():
+def test_MSG3_a_value_that_is_not_an_object_names_its_type_in_a_marker():
     nested = errors_of(Order, {"address": "Paris", "items": [], "tags": []})
     body = errors_of(SignupSerializer, ["not", "an", "object"])
 
-    code, template = WORDINGS["object_type"]
-    assert entry_view(nested)[0] == (
-        code,
-        template.replace(":attribute", "address"),
-        None,
-        "address",
-    )
-    assert entry_view(body) == [(*WORDINGS["body_not_object"], None, None)]
+    assert entry_view(nested)[0] == ("invalid", NOT_AN_OBJECT, {"datatype": "str"}, "address")
+    assert entry_view(body) == [("invalid", NOT_AN_OBJECT, {"datatype": "list"}, None)]
 
 
-def test_MSG2_a_size_rule_takes_its_code_from_the_field_type():
+def test_MSG2_size_rules_keep_drfs_codes_and_bounds():
     class Sized(serializers.Serializer):
         seats = serializers.IntegerField(label="seats", min_value=10)
         price = serializers.DecimalField(label="price", max_digits=3, decimal_places=1)
@@ -167,25 +198,37 @@ def test_MSG2_a_size_rule_takes_its_code_from_the_field_type():
     entries = errors_of(Sized, {"seats": 5, "price": "123.4", "guests": ["ada"]})
 
     assert entry_view(entries) == [
-        ("too_small", "The seats must be at least {min}.", {"min": 10}, "seats"),
-        ("too_large", "The price must not have more than {max} digits.", {"max": 3}, "price"),
-        ("too_few", "The guests must have at least {min} items.", {"min": 2}, "guests"),
+        (
+            "min_value",
+            "Ensure this value is greater than or equal to {min_value}.",
+            {"min_value": 10},
+            "seats",
+        ),
+        (
+            "max_digits",
+            "Ensure that there are no more than {max_digits} digits in total.",
+            {"max_digits": 3},
+            "price",
+        ),
+        (
+            "min_length",
+            "Ensure this field has at least {min_length} elements.",
+            {"min_length": 2},
+            "guests",
+        ),
     ]
 
 
-# -- MSG-10: the label the field declares ------------------------------------------------------
+def test_MSG3_a_choice_names_the_rejected_input_in_a_marker():
+    class Kind(serializers.Serializer):
+        kind = serializers.ChoiceField(label="kind", choices=["a", "b"])
+
+    assert entry_view(errors_of(Kind, {"kind": "zz"})) == [
+        ("invalid_choice", '"{input}" is not a valid choice.', {"input": "zz"}, "kind")
+    ]
 
 
-def test_MSG10_a_model_serializer_labels_with_verbose_name_and_an_undeclared_field_by_its_key():
-    entries = errors_of(AccountSerializer, {})
-
-    assert [e["template"] for e in entries] == [
-        "The email address is required.",
-        "The cc_number is required.",
-    ], "a label guessed from the key reads 'Cc number'"
-
-
-# -- the exception handler ---------------------------------------------------------------------
+# -- DRF's error response, with the entries beside it (MSG-1, MSG-8) ---------------------------
 
 
 @pytest.fixture()
@@ -243,50 +286,66 @@ def api(settings, httpx_mock):
     reset_client()
 
 
-def test_MSG1_a_failed_request_answers_with_the_default_envelope(api):
+def test_MSG1_a_failed_request_keeps_drfs_body_with_the_entries_beside_it(api):
     response = api.post("/signup/", {"email": ""}, format="json")
     body = json.loads(response.content)
+    key = "langsys_errors"
 
     assert response.status_code == 400
-    assert body["error"]["code"] == "validation_failed"
-    assert [(e["code"], e["field"]) for e in body["error"]["errors"]] == [("required", "email")]
-    # MSG-8: templates the catalog did not list are registered after the response.
-    assert set(api.registered) == {
-        "The request failed validation.",
-        "The email address is required.",
-    }
-
-
-def test_MSG2_a_body_that_is_not_json_takes_the_wording_table(api):
-    response = api.post("/signup/", data="{not json", content_type="application/json")
-    body = json.loads(response.content)
-
-    assert response.status_code == 400
-    assert [(e["code"], e["template"]) for e in body["error"]["errors"]] == [
-        WORDINGS["body_not_json"]
+    assert set(body) == {"email", key}
+    assert body.pop("email") == ["This field may not be blank."]
+    assert [(e["code"], e["field"], e["template"]) for e in body[key]] == [
+        ("blank", "email", "This field may not be blank.")
     ]
+    # MSG-8: a template the catalog did not list is registered after the response.
+    assert api.registered == ["This field may not be blank."]
 
 
-# -- MSG-7: every template listable ahead of time ----------------------------------------------
+def test_MSG1_the_key_the_entries_sit_under_is_configurable(api, settings):
+    settings.LANGSYS = {"RESPONSE_KEY": "translatable"}
+
+    body = json.loads(api.post("/signup/", {"email": ""}, format="json").content)
+
+    assert set(body) == {"email", "translatable"}
 
 
-def test_MSG7_the_provider_lists_each_template_with_its_label_written_in():
+def test_MSG1_a_response_that_is_not_a_failed_validation_is_drfs_own(api):
+    response = api.post("/signup/", data="{not json", content_type="application/json")
+
+    assert response.status_code == 400
+    assert set(json.loads(response.content)) == {"detail"}
+
+
+# -- MSG-7 / MSG-10: listing ahead of time -----------------------------------------------------
+
+
+def test_MSG7_the_provider_lists_drfs_own_sentences():
     listed = list(declared_templates([SignupSerializer, Order]))
-    templates = {item["template"] for item in listed if not isinstance(item, TemplateProblem)}
+    templates = {item["template"] for item in listed if isinstance(item, dict)}
 
-    assert not [item for item in listed if isinstance(item, TemplateProblem)]
+    assert not [item for item in listed if isinstance(item, (TemplateProblem, LabelAdvice))]
     assert templates >= {
-        "The email address is required.",
-        "The email address must be a valid email address.",
-        "The email address must be at least {min} characters.",
-        "The city is required.",
-        "The item name must not be longer than {max} characters.",
-        WORDINGS["object_type"][1].replace(":attribute", "address"),
-        WORDINGS["body_not_json"][1],
+        "This field is required.",
+        "Enter a valid email address.",
+        "Ensure this field has at least {min_length} characters.",
+        "Ensure this field has no more than {max_length} characters.",
+        NOT_AN_OBJECT,
+    }
+    assert "Ensure this value is less than or equal to {max_value}." not in templates
+
+
+def test_MSG7_a_model_serializers_uniqueness_is_listed_with_drfs_field_names():
+    templates = {
+        item["template"]
+        for item in declared_templates([MembershipSerializer])
+        if isinstance(item, dict)
     }
 
+    assert "membership with this handle already exists." in templates, "as DRF fills it"
+    assert "The fields team, role must make a unique set." in templates
 
-def test_MSG7_an_unlabelled_field_and_an_undeclared_validator_are_problems():
+
+def test_MSG7_an_undeclared_validator_is_a_problem_and_an_unlabelled_field_advice():
     class Loose(serializers.Serializer):
         code = serializers.CharField()
         name = serializers.CharField(label="name", validators=[no_reserved_names])
@@ -294,6 +353,25 @@ def test_MSG7_an_unlabelled_field_and_an_undeclared_validator_are_problems():
         def validate_name(self, value):
             return value
 
-    problems = [item for item in declared_templates([Loose]) if isinstance(item, TemplateProblem)]
+    listed = list(declared_templates([Loose]))
+    problems = [item for item in listed if isinstance(item, TemplateProblem)]
+    advice = [item for item in listed if isinstance(item, LabelAdvice)]
 
-    assert sorted(problem.field for problem in problems) == ["code", "name", "name"]
+    assert sorted(problem.field for problem in problems) == ["name", "name"]
+    assert [item.field for item in advice] == ["code"]
+
+
+def test_MSG10_a_model_serializer_declares_with_verbose_name():
+    advice = [
+        item for item in declared_templates([AccountSerializer]) if isinstance(item, LabelAdvice)
+    ]
+
+    assert [(item.field, item.label) for item in advice] == [("cc_number", "Cc number")]
+
+
+def test_MSG11_a_template_holding_drfs_field_names_placeholder_is_refused(capsys):
+    call_command("langsys_messages", "--provider", "tests.test_drf:clashing_templates")
+    out = capsys.readouterr().out
+
+    assert "PROBLEM" in out and "{field_names}" in out
+    assert not re.search(r"^The fields \{field_names\} clash\.", out, re.M)
