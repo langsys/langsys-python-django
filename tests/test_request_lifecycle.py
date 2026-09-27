@@ -417,6 +417,66 @@ def test_BIND2_capability_unknown_holds_the_queue_through_the_binding(httpx_mock
     ], "the queue was discarded because capability could not be determined"
 
 
+# -- REG-10: the core names every skipped or failed write; the binding reads none of it ---------
+
+
+@pytest.fixture()
+def flushes(langsys, monkeypatch):
+    """What each flush at the request boundary returned: the core's result, which the binding's
+    hook calls for and never reads."""
+    results: list[dict[str, Any]] = []
+    flush = langsys.flush_pending
+
+    def recorded(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        result = flush(*args, **kwargs)
+        results.append(result)
+        return result
+
+    monkeypatch.setattr(langsys, "flush_pending", recorded)
+    return results
+
+
+@pytest.mark.parametrize(
+    ("answers", "reason"),
+    [
+        ("read-only", "not-write-enabled"),
+        ("authorize-unreachable", "capability-unknown"),
+        ("catalog-unreachable", "catalog-unavailable"),
+        ("send-refused", "registration-failed"),
+    ],
+)
+def test_REG10_the_request_boundary_flush_names_why_it_wrote_nothing(
+    httpx_mock, flushes, answers, reason
+):
+    if answers == "authorize-unreachable":
+        httpx_mock.add_exception(httpx.ConnectError("down"), url=AUTH, is_reusable=True)
+    else:
+        read_only = answers == "read-only"
+        httpx_mock.add_response(
+            url=AUTH,
+            json=authorize("read" if read_only else "write", write_enabled=not read_only),
+            is_reusable=True,
+        )
+    if answers == "catalog-unreachable":
+        httpx_mock.add_exception(httpx.ConnectError("down"), url=TRANS, is_reusable=True)
+    else:
+        httpx_mock.add_response(url=TRANS, json=catalog({"UI": {}}), is_reusable=True)
+    if answers == "send-refused":
+        httpx_mock.add_response(
+            url=ITEMS, status_code=500, json={"status": False}, is_reusable=True
+        )
+    else:
+        accept_items(httpx_mock)
+
+    response = Client().get("/miss/?locale=es-ES")
+
+    assert response.status_code == 200, "the page is served whatever the write's outcome"
+    assert response.content == b"ok"
+    assert flushes, "control: the request boundary flushed"
+    assert flushes[-1]["success"] is False
+    assert flushes[-1]["reason"] == reason
+
+
 # -- GATE-3 ---------------------------------------------------------------------
 
 
